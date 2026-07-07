@@ -77,3 +77,12 @@ Useful options:
 	- `encrypted_pdf`
 	- `corrupted_pdf`
 	- `unreadable_pdf`
+
+## Phase 4 Image Resizing Rules
+
+- Image processing uses `Pillow`
+- Longest-edge policy: images above `1540` are downscaled while preserving aspect ratio
+- Images at or below the limit keep their dimensions unchanged
+- Source images outside `im-temp` are copied into `im-temp` with deterministic hashed names
+- Rasterized PDF page images already in `im-temp` are resized in place when needed
+- Validation rule: post-resize dimensions must be positive and longest edge must be `<= max_longest_edge_px`
