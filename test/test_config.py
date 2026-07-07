@@ -33,3 +33,30 @@ def test_build_config_normalizes_and_sorts_sources(tmp_path: Path) -> None:
     assert config.image.token_threshold == 16000
     assert config.runtime.dry_run is True
     assert config.runtime.overwrite is False
+
+
+def test_build_config_defaults_temp_and_log_paths_next_to_source(tmp_path: Path) -> None:
+    source_dir = tmp_path / "incoming"
+    source_dir.mkdir()
+    args = Namespace(
+        source=[str(source_dir)],
+        source_list_file=[],
+        output_dir=None,
+        im_temp_dir=None,
+        md_temp_dir=None,
+        log_file=None,
+        model_endpoint_url="http://127.0.0.1:8080/v1/chat/completions",
+        model_name="lightonocr-2",
+        request_timeout_seconds=120.0,
+        request_max_retries=2,
+        max_longest_edge_px=1540,
+        token_threshold=16000,
+        dry_run=True,
+        overwrite=False,
+    )
+
+    config = build_config_from_args(args)
+
+    assert config.paths.im_temp_dir == (source_dir / "im-temp").resolve()
+    assert config.paths.md_temp_dir == (source_dir / "md-temp").resolve()
+    assert config.paths.log_file == (source_dir / "logs" / "md-gen.log").resolve()

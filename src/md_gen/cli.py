@@ -23,10 +23,10 @@ def _build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Text file with one source path per line.",
     )
-    parser.add_argument("--output-dir", default="output")
-    parser.add_argument("--im-temp-dir", default="im-temp")
-    parser.add_argument("--md-temp-dir", default="md-temp")
-    parser.add_argument("--log-file", default="logs/md-gen.log")
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--im-temp-dir", default=None)
+    parser.add_argument("--md-temp-dir", default=None)
+    parser.add_argument("--log-file", default=None)
     parser.add_argument(
         "--model-endpoint-url",
         default="http://127.0.0.1:8080/v1/chat/completions",

@@ -67,3 +67,58 @@ Keep responsibilities separated. Do not duplicate OCR or normalization logic bet
 ## Documentation Expectations
 - For each goal, create design docs under `design/` before implementation.
 - Document assumptions, constraints, and unresolved decisions explicitly.
+
+## Commit Message Template
+Use a structured commit format based on Conventional Commits.
+
+Template:
+
+```text
+<type>(<optional-scope>): <short imperative summary>
+
+<optional body>
+
+<optional footer(s)>
+```
+
+Recommended `type` values:
+- `feat`: new user-facing behavior
+- `fix`: bug fix or behavior correction
+- `refactor`: code change without behavior change
+- `perf`: performance improvement
+- `test`: tests added or updated
+- `docs`: documentation-only change
+- `build`: build or dependency changes
+- `ci`: CI/CD pipeline changes
+- `chore`: maintenance tasks
+
+Formatting rules:
+- Keep the subject line concise (prefer <= 72 chars)
+- Use imperative mood (e.g., "add", "fix", "refactor")
+- Do not end the subject with a period
+- In the body, explain what changed and why
+- Wrap body lines for readability (prefer around 72 chars)
+- Use footer for references (e.g., `Refs: #123`) and breaking changes
+
+Breaking changes:
+- Add `!` after type/scope, or include `BREAKING CHANGE:` in footer
+
+Examples:
+
+```text
+feat(md-gen): add markdown provenance persistence for OCR outputs
+
+Write OCR results to md-temp with deterministic filenames and
+front-matter metadata for downstream normalization.
+
+Refs: #42
+```
+
+```text
+fix(md-gen)!: require overwrite for existing markdown outputs
+
+Prevent silent replacement by failing when target markdown already
+exists unless --overwrite is explicitly provided.
+
+BREAKING CHANGE: reruns now require --overwrite to replace md-temp files.
+```

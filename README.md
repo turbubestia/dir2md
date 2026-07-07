@@ -48,16 +48,21 @@ uv run md-gen --source ./samples --dry-run
 Useful options:
 - `--source` (repeatable): source file or directory inputs
 - `--source-list-file` (repeatable): text file with one source path per line (`#` comment lines supported)
-- `--output-dir`: future normalized output location
-- `--im-temp-dir`: temporary rasterized/preprocessed image path
-- `--md-temp-dir`: temporary markdown output path
-- `--log-file`: plain text log destination
+- `--output-dir`: future normalized output location (default: `<source-base>/output`)
+- `--im-temp-dir`: temporary rasterized/preprocessed image path (default: `<source-base>/im-temp`)
+- `--md-temp-dir`: temporary markdown output path (default: `<source-base>/md-temp`)
+- `--log-file`: plain text log destination (default: `<source-base>/logs/md-gen.log`)
 - `--model-endpoint-url`: local llama.cpp-compatible endpoint
 - `--model-name`: OCR model identifier
 - `--max-longest-edge-px`: image longest-edge limit (default `1540`)
 - `--token-threshold`: OCR token budget threshold (default `16000`)
 - `--dry-run` / `--no-dry-run`
 - `--overwrite`
+
+Default path behavior:
+- when a single source directory is provided, temp folders and logs are created inside that directory
+- when a single source file is provided, temp folders and logs are created next to that file
+- explicit path arguments always override defaults
 
 ## Phase 2 Discovery Rules
 
@@ -111,3 +116,19 @@ Useful options:
 	- `invalid_payload_error`
 	- `inference_timeout_error`
 - OCR execution is performed only when `--no-dry-run` is used
+
+## Phase 7 Markdown Persistence Rules
+
+- OCR markdown is written to `md-temp`
+- Each output includes a stable metadata header with provenance fields:
+	- `source_file_name`
+	- `source_file_path`
+	- `source_type`
+	- `source_page_index` (for PDF pages)
+	- `generated_at_utc`
+	- `model_name`
+	- `image_dimensions`
+	- `estimated_vision_tokens`
+- Output markdown names are deterministic and include source-derived hashes
+- If a destination markdown exists and `--overwrite` is not enabled, persistence fails to prevent silent replacement
+- Re-running on the same source set should use `--overwrite` when you want to refresh markdown outputs
