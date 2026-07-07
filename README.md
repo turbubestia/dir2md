@@ -132,3 +132,33 @@ Default path behavior:
 - Output markdown names are deterministic and include source-derived hashes
 - If a destination markdown exists and `--overwrite` is not enabled, persistence fails to prevent silent replacement
 - Re-running on the same source set should use `--overwrite` when you want to refresh markdown outputs
+
+## Phase 8 Artifact Management Rules
+
+- Temp artifact directories are created as needed:
+	- `im-temp` for rasterized and resized images
+	- `md-temp` for OCR markdown outputs
+- Dry-run mode (`--dry-run`) only produces temporary image artifacts and never writes markdown outputs
+- Dry-run and analysis flows do not mutate source files
+- Markdown overwrite behavior is explicit:
+	- default mode fails if a target markdown file already exists
+	- `--overwrite` allows deterministic replacement
+- `output` is reserved for later normalization phases and is not written during foundation execution
+
+## Phase 9 Logging and Observability Rules
+
+- Logging uses plain text lines written to `--log-file` (default `<source-base>/logs/md-gen.log`)
+- Each run records:
+	- `RUN_START` with timestamp and runtime flags
+	- one `STAGE` entry per pipeline stage with status and duration
+	- `RUN_SUMMARY` with totals and final status
+- Dry-run stages for OCR and markdown persistence are logged with `status=skipped`
+- Failure paths append a failed run summary with the exception type for basic diagnostics
+
+## Phase 10 Validation and Test Coverage
+
+- Unit coverage includes discovery ordering, rasterization metadata/error mapping, resizing policy, token budget checks, gateway retry/error handling, and markdown metadata persistence
+- Foundation integration tests cover:
+	- dry-run artifact behavior and skipped persistence
+	- overwrite enforcement for markdown outputs
+	- run-level failure summary logging
