@@ -1,0 +1,27 @@
+[project]
+name = "dir2md"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "pillow>=12.3.0",
+    "pypdfium2>=5.11.0",
+]
+
+[project.scripts]
+md-gen = "md_gen.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/md_gen"]
