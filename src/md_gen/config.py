@@ -20,6 +20,7 @@ class ModelSettings:
     endpoint_url: str
     model_name: str
     request_timeout_seconds: float
+    request_max_retries: int
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ def build_config_from_args(args: SimpleNamespace) -> AppConfig:
             endpoint_url=args.model_endpoint_url,
             model_name=args.model_name,
             request_timeout_seconds=args.request_timeout_seconds,
+            request_max_retries=args.request_max_retries,
         ),
         image=ImageSettings(
             max_longest_edge_px=args.max_longest_edge_px,

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .config import AppConfig
 from .discovery import WorkItem, build_work_items
+from .gateway import LlamaOcrGateway, OcrResponse, build_default_ocr_requests
 from .rasterizer import PdfPageRaster, rasterize_pdf_work_items
 from .resizer import ImageResizeResult, resize_images_for_ocr
 from .token_budget import ImageTokenBudgetReport, enforce_token_budget, evaluate_token_budget_for_images
@@ -57,12 +58,29 @@ def validate_token_budget(
     return reports
 
 
+def execute_ocr(
+    config: AppConfig,
+    resized_images: tuple[ImageResizeResult, ...],
+) -> tuple[OcrResponse, ...]:
+    image_paths = tuple(image.output_image_path for image in resized_images)
+    ocr_requests = build_default_ocr_requests(image_paths)
+    with LlamaOcrGateway(
+        endpoint_url=config.model.endpoint_url,
+        model_name=config.model.model_name,
+        request_timeout_seconds=config.model.request_timeout_seconds,
+        request_max_retries=config.model.request_max_retries,
+    ) as gateway:
+        return gateway.send_ocr_requests(ocr_requests)
+
+
 def run_foundation_bootstrap(config: AppConfig) -> int:
     ensure_phase_one_directories(config)
     work_items = prepare_work_items(config)
     pdf_pages = rasterize_pdf_items(config, work_items)
     resized_images = resize_images(config, work_items, pdf_pages)
     validate_token_budget(config, resized_images)
+    if not config.runtime.dry_run:
+        execute_ocr(config, resized_images)
     return 0
 
 

@@ -96,3 +96,18 @@ Useful options:
 	- `ok`: comfortably within threshold
 	- `warning`: near threshold (>= 90 percent)
 	- `error`: exceeds threshold (run fails)
+
+## Phase 6 Local Gateway Rules
+
+- Transport uses local llama.cpp endpoint with OpenAI Vision-compatible payload shape
+- Request payload includes `messages` content blocks for text prompt and base64 image data URL
+- Sequential request flow is preserved
+- Timeout and retry behavior is configurable via:
+	- `--request-timeout-seconds`
+	- `--request-max-retries`
+- Structured error categories:
+	- `connection_error`
+	- `model_unavailable_error`
+	- `invalid_payload_error`
+	- `inference_timeout_error`
+- OCR execution is performed only when `--no-dry-run` is used

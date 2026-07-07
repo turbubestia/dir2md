@@ -17,6 +17,7 @@ def test_build_config_normalizes_and_sorts_sources(tmp_path: Path) -> None:
         model_endpoint_url="http://127.0.0.1:8080/v1/chat/completions",
         model_name="lightonocr-2",
         request_timeout_seconds=120.0,
+        request_max_retries=2,
         max_longest_edge_px=1540,
         token_threshold=16000,
         dry_run=True,
@@ -27,6 +28,7 @@ def test_build_config_normalizes_and_sorts_sources(tmp_path: Path) -> None:
 
     assert config.paths.source_paths == tuple(sorted({src_a.resolve(), src_b.resolve()}))
     assert config.paths.source_list_files == tuple()
+    assert config.model.request_max_retries == 2
     assert config.image.max_longest_edge_px == 1540
     assert config.image.token_threshold == 16000
     assert config.runtime.dry_run is True

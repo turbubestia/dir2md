@@ -33,6 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model-name", default="lightonocr-2")
     parser.add_argument("--request-timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--request-max-retries", type=int, default=2)
     parser.add_argument("--max-longest-edge-px", type=int, default=1540)
     parser.add_argument("--token-threshold", type=int, default=16000)
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=True)

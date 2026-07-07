@@ -16,6 +16,7 @@ def _build_args(source: list[str], source_list_file: list[str]) -> Namespace:
         model_endpoint_url="http://127.0.0.1:8080/v1/chat/completions",
         model_name="lightonocr-2",
         request_timeout_seconds=120.0,
+        request_max_retries=2,
         max_longest_edge_px=1540,
         token_threshold=16000,
         dry_run=True,
