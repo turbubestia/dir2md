@@ -6,6 +6,7 @@ from .config import AppConfig
 from .discovery import WorkItem, build_work_items
 from .rasterizer import PdfPageRaster, rasterize_pdf_work_items
 from .resizer import ImageResizeResult, resize_images_for_ocr
+from .token_budget import ImageTokenBudgetReport, enforce_token_budget, evaluate_token_budget_for_images
 
 
 def ensure_phase_one_directories(config: AppConfig) -> None:
@@ -44,11 +45,24 @@ def resize_images(
     )
 
 
+def validate_token_budget(
+    config: AppConfig,
+    resized_images: tuple[ImageResizeResult, ...],
+) -> tuple[ImageTokenBudgetReport, ...]:
+    reports = evaluate_token_budget_for_images(
+        resized_images=resized_images,
+        token_threshold=config.image.token_threshold,
+    )
+    enforce_token_budget(reports)
+    return reports
+
+
 def run_foundation_bootstrap(config: AppConfig) -> int:
     ensure_phase_one_directories(config)
     work_items = prepare_work_items(config)
     pdf_pages = rasterize_pdf_items(config, work_items)
-    resize_images(config, work_items, pdf_pages)
+    resized_images = resize_images(config, work_items, pdf_pages)
+    validate_token_budget(config, resized_images)
     return 0
 
 

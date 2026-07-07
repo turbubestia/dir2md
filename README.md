@@ -86,3 +86,13 @@ Useful options:
 - Source images outside `im-temp` are copied into `im-temp` with deterministic hashed names
 - Rasterized PDF page images already in `im-temp` are resized in place when needed
 - Validation rule: post-resize dimensions must be positive and longest edge must be `<= max_longest_edge_px`
+
+## Phase 5 Token Budget Rules
+
+- Formula: image tokens = (width * height) / 1024 using post-resize dimensions
+- Token estimates are integer-truncated for deterministic checks
+- Threshold validation runs per image before OCR submission
+- Status contract per image:
+	- `ok`: comfortably within threshold
+	- `warning`: near threshold (>= 90 percent)
+	- `error`: exceeds threshold (run fails)
