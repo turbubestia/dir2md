@@ -5,11 +5,14 @@ import httpx
 from PIL import Image
 
 from md_gen.gateway import (
+    BridgeScoreRequest,
     GatewayError,
+    LlamaLanguageGateway,
     LlamaOcrGateway,
     LlamaSummaryGateway,
     OcrRequest,
     SummaryRequest,
+    build_bridge_score_request_payload,
     build_text_summary_request_payload,
     build_vision_request_payload,
     sanitize_summary_text,
@@ -142,3 +145,56 @@ def test_summary_gateway_parses_and_sanitizes_plain_text_response() -> None:
 
 def test_sanitize_summary_text_keeps_only_plain_ascii_text() -> None:
     assert sanitize_summary_text("A_B:C\nZ@1-2.") == "A B C Z 1-2."
+
+
+def test_build_bridge_score_payload_has_expected_shape() -> None:
+    payload = build_bridge_score_request_payload(
+        model_name="qwen3-1.7b",
+        request=BridgeScoreRequest(
+            page_a_end="total amount due is",
+            page_a_summary="utility invoice",
+            page_b_start="100.00 payable",
+            page_b_summary="same utility invoice details",
+        ),
+    )
+
+    assert payload["model"] == "qwen3-1.7b"
+    assert payload["messages"][0]["role"] == "system"
+    assert payload["messages"][1]["role"] == "user"
+    assert "Page A End" in payload["messages"][1]["content"]
+
+
+def test_language_gateway_parses_bridge_score_json_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"reason":"natural continuation","bridge_score":8}',
+                    }
+                }
+            ]
+        }
+        return httpx.Response(status_code=200, content=json.dumps(body))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), timeout=2.0)
+    gateway = LlamaLanguageGateway(
+        endpoint_url="http://localhost:8081/v1/chat/completions",
+        model_name="qwen3-1.7b",
+        request_timeout_seconds=2.0,
+        request_max_retries=0,
+        client=client,
+    )
+
+    response = gateway.send_bridge_score_request(
+        BridgeScoreRequest(
+            page_a_end="total amount due is",
+            page_a_summary="utility invoice",
+            page_b_start="100.00 payable",
+            page_b_summary="same utility invoice details",
+        )
+    )
+
+    assert response.bridge_score == 8
+    assert response.reason == "natural continuation"
+    client.close()

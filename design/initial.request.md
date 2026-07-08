@@ -11,7 +11,7 @@ This document set the initial task of the project.
     1. First determine the software architecture (so no code yet) 
     2. Write an implementation plan (so no code yet) 
     3. Run implementation
-3. Design a local (not web interface yet) python code to parse the PDF and produce the markdown file. 
+3. Design a local (not web interface yet) python code to parse the JSON files and produce unified markdown file (those from loose image that actually correspond to multi-page scanned documents). 
     1. First determine the software architecture (so no code yet) 
     2. Write an implementation plan (so no code yet) 
     3. Run implementation
@@ -35,7 +35,7 @@ This document set the initial task of the project.
     This would results in a folder structure like:
 ```
 /src/md-gen
-/src/md-norm
+/src/md-mrg
 /src/backend
 /src/frontend
 ```

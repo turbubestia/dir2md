@@ -1,72 +1,127 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "DocumentMetadata",
-  "type": "object",
-  "required": ["document_id", "source_name", "total_pages", "is_verified_sequence", "fragments"],
-  "properties": {
-    "document_id": {
-      "type": "string",
-      "description": "A unique UUID or hash representing the entire document or logical group."
-    },
-    "source_name": {
-      "type": "string",
-      "description": "The original file name (e.g., 'invoice_meal.pdf' or 'scan001.jpg')."
-    },
-    "total_pages": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Total number of pages/fragments belonging to this document container."
-    },
-    "is_verified_sequence": {
-      "type": "boolean",
-      "description": "True if the page order is guaranteed by the source (e.g., native PDF). False if it is a loose scan requiring LLM assembly."
-    },
-    "global_summary": {
-      "type": "string",
-      "description": "Optional overall summary of the complete document (populated later if multi-page)."
-    },
-    "fragments": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["sequence_number", "image_file", "markdown_file"],
-        "properties": {
-          "sequence_number": {
-            "type": "integer",
-            "description": "The page index. For unsequenced scans, defaults to 1 or an initial guess."
+  "title": "Dir2MdMetadata",
+  "description": "Unified schema supporting per-document metadata and merge batch artifacts.",
+  "oneOf": [
+    { "$ref": "#/$defs/document" },
+    { "$ref": "#/$defs/batch" }
+  ],
+  "$defs": {
+    "fragment": {
+      "type": "object",
+      "required": ["sequence_number", "image_file", "markdown_file"],
+      "properties": {
+        "sequence_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "image_file": {
+          "type": "string"
+        },
+        "markdown_file": {
+          "type": "string"
+        },
+        "anchors": {
+          "type": "object",
+          "properties": {
+            "first_line": { "type": "string" },
+            "last_line": { "type": "string" },
+            "page_header": { "type": "string" },
+            "page_footer": { "type": "string" }
           },
-          "image_file": {
-            "type": "string",
-            "description": "Filename of the processed image asset used for OCR."
-          },
-          "markdown_file": {
-            "type": "string",
-            "description": "Filename of the generated markdown output."
-          },
-          "anchors": {
-            "type": "object",
-            "description": "Text hooks designed specifically for the downstream LLM to stitch fragments together.",
-            "properties": {
-              "first_line": { "type": "string", "description": "The very first meaningful line of text on this page." },
-              "last_line": { "type": "string", "description": "The very last line of text on this page (excellent for finding sentence continuations)." },
-              "page_header": { "type": "string", "description": "Detected header text (e.g., 'Chapter 3', 'Invoice #123')." },
-              "page_footer": { "type": "string", "description": "Detected footer text (e.g., explicit page numbers like 'Page 2 of 5')." }
+          "additionalProperties": true
+        },
+        "content_fingerprint": {
+          "type": "object",
+          "properties": {
+            "snippet": { "type": "string" },
+            "detected_entities": {
+              "type": "array",
+              "items": { "type": "string" }
             }
           },
-          "content_fingerprint": {
-            "type": "object",
-            "description": "Metadata hints to find relationships between isolated scans.",
-            "properties": {
-              "snippet": { "type": "string", "description": "A 200-character summary or semantic representation of the page content." },
-              "detected_entities": {
-                "type": "array",
-                "items": { "type": "string" },
-                "description": "Extracted key nouns, invoice numbers, or dates that should match across a multi-page document."
-              }
-            }
-          }
+          "additionalProperties": true
         }
-      }
+      },
+      "additionalProperties": true
+    },
+    "document": {
+      "type": "object",
+      "required": ["document_id", "source_name", "total_pages", "is_verified_sequence", "fragments"],
+      "properties": {
+        "document_id": { "type": "string" },
+        "source_name": { "type": "string" },
+        "total_pages": { "type": "integer", "minimum": 1 },
+        "is_verified_sequence": { "type": "boolean" },
+        "merge_confidence": { "type": "number" },
+        "review_required": { "type": "boolean" },
+        "global_summary": { "type": "string" },
+        "source_document_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "fragments": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/fragment" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "edge_score": {
+      "type": "object",
+      "required": [
+        "from_fragment_id",
+        "to_fragment_id",
+        "score_0_10",
+        "decision_status",
+        "scorer_type",
+        "latency_ms"
+      ],
+      "properties": {
+        "from_fragment_id": { "type": "string" },
+        "to_fragment_id": { "type": "string" },
+        "score_0_10": { "type": "number", "minimum": 0, "maximum": 10 },
+        "reason": { "type": "string" },
+        "decision_status": {
+          "type": "string",
+          "enum": ["auto_merge", "review_required", "reject"]
+        },
+        "scorer_type": {
+          "type": "string",
+          "enum": ["heuristic", "llm"]
+        },
+        "latency_ms": { "type": "number", "minimum": 0 },
+        "review_required": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "batch": {
+      "type": "object",
+      "required": ["batch_id", "generated_at_utc", "documents"],
+      "properties": {
+        "schema_version": { "type": "string" },
+        "batch_id": { "type": "string" },
+        "generated_at_utc": { "type": "string" },
+        "md_temp_dir": { "type": "string" },
+        "scorer_mode": {
+          "type": "string",
+          "enum": ["heuristic", "llm", "both"]
+        },
+        "active_scorer": {
+          "type": "string",
+          "enum": ["heuristic", "llm"]
+        },
+        "documents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/document" }
+        },
+        "edge_scores": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/edge_score" }
+        }
+      },
+      "additionalProperties": true
     }
   }
 }
