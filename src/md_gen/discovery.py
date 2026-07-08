@@ -48,12 +48,22 @@ def _collect_candidate_paths(config: AppConfig) -> list[Path]:
     return candidates
 
 
-def _discover_from_path(path: Path) -> list[Path]:
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _discover_from_path(path: Path, excluded_roots: tuple[Path, ...]) -> list[Path]:
     if path.is_dir():
         return [
             candidate.resolve()
             for candidate in sorted(path.rglob("*"), key=lambda candidate: _ordering_key(candidate.resolve()))
-            if candidate.is_file() and candidate.suffix.lower() in _SUPPORTED_EXTENSIONS
+            if candidate.is_file()
+            and candidate.suffix.lower() in _SUPPORTED_EXTENSIONS
+            and not any(_is_within(candidate.resolve(), root) for root in excluded_roots)
         ]
 
     if not path.exists():
@@ -67,8 +77,19 @@ def _discover_from_path(path: Path) -> list[Path]:
 
 def discover_supported_files(config: AppConfig) -> tuple[Path, ...]:
     discovered: set[Path] = set()
+    excluded_roots = tuple(
+        sorted(
+            {
+                config.paths.im_temp_dir.resolve(),
+                config.paths.md_temp_dir.resolve(),
+                config.paths.output_dir.resolve(),
+                config.paths.log_file.parent.resolve(),
+            },
+            key=lambda path: path.as_posix().lower(),
+        )
+    )
     for candidate in _collect_candidate_paths(config):
-        discovered.update(_discover_from_path(candidate))
+        discovered.update(_discover_from_path(candidate, excluded_roots))
 
     ordered = sorted(discovered, key=_ordering_key)
     return tuple(ordered)

@@ -4,7 +4,16 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
-from md_gen.gateway import GatewayError, LlamaOcrGateway, OcrRequest, build_vision_request_payload
+from md_gen.gateway import (
+    GatewayError,
+    LlamaOcrGateway,
+    LlamaSummaryGateway,
+    OcrRequest,
+    SummaryRequest,
+    build_text_summary_request_payload,
+    build_vision_request_payload,
+    sanitize_summary_text,
+)
 
 
 def _make_image(path: Path) -> None:
@@ -88,3 +97,48 @@ def test_gateway_maps_timeout_error(tmp_path: Path) -> None:
     else:
         raise AssertionError("Expected GatewayError for timeout")
     client.close()
+
+
+def test_build_text_summary_payload_uses_system_and_user_messages() -> None:
+    payload = build_text_summary_request_payload(
+        model_name="qwen3-1.7b",
+        request=SummaryRequest(source_text="OCR markdown output"),
+    )
+
+    assert payload["model"] == "qwen3-1.7b"
+    assert payload["messages"][0]["role"] == "system"
+    assert payload["messages"][1]["role"] == "user"
+    assert payload["messages"][1]["content"] == "OCR markdown output"
+    assert payload["temperature"] == 0
+
+
+def test_summary_gateway_parses_and_sanitizes_plain_text_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Invoice #123\nTotal: $500.00 <think>ignore</think>",
+                    }
+                }
+            ]
+        }
+        return httpx.Response(status_code=200, content=json.dumps(body))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), timeout=2.0)
+    gateway = LlamaSummaryGateway(
+        endpoint_url="http://localhost:8081/v1/chat/completions",
+        model_name="qwen3-1.7b",
+        request_timeout_seconds=2.0,
+        request_max_retries=0,
+        client=client,
+    )
+
+    response = gateway.send_summary_request(SummaryRequest(source_text="sample"))
+
+    assert response.summary_text == "Invoice 123 Total 500.00 think ignore think"
+    client.close()
+
+
+def test_sanitize_summary_text_keeps_only_plain_ascii_text() -> None:
+    assert sanitize_summary_text("A_B:C\nZ@1-2.") == "A B C Z 1-2."
