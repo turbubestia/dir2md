@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from hashlib import sha1
 from pathlib import Path
 
@@ -19,6 +18,7 @@ class PersistedMarkdownRecord:
     source_page_index: int | None
     output_markdown_path: Path
     estimated_vision_tokens: int
+    was_written: bool
 
 
 def _sanitize_stem(path: Path) -> str:
@@ -44,37 +44,6 @@ def _build_output_markdown_path(
     return md_temp_dir / filename
 
 
-def _format_metadata_header(
-    source_file_path: Path,
-    source_type: str,
-    source_page_index: int | None,
-    generated_at_utc: str,
-    model_name: str,
-    image_width: int,
-    image_height: int,
-    estimated_vision_tokens: int,
-) -> str:
-    lines = [
-        "---",
-        f"source_file_name: {source_file_path.name}",
-        f"source_file_path: {source_file_path.as_posix()}",
-        f"source_type: {source_type}",
-    ]
-    if source_page_index is not None:
-        lines.append(f"source_page_index: {source_page_index}")
-    lines.extend(
-        [
-            f"generated_at_utc: {generated_at_utc}",
-            f"model_name: {model_name}",
-            f"image_dimensions: {image_width}x{image_height}",
-            f"estimated_vision_tokens: {estimated_vision_tokens}",
-            "---",
-            "",
-        ]
-    )
-    return "\n".join(lines)
-
-
 def persist_ocr_markdown(
     ocr_responses: tuple[OcrResponse, ...],
     pdf_pages: tuple[PdfPageRaster, ...],
@@ -85,7 +54,6 @@ def persist_ocr_markdown(
     overwrite: bool,
 ) -> tuple[PersistedMarkdownRecord, ...]:
     md_temp_dir.mkdir(parents=True, exist_ok=True)
-    generated_at_utc = datetime.now(timezone.utc).isoformat()
 
     pdf_page_by_image = {page.image_path.resolve(): page for page in pdf_pages}
     resized_by_image = {image.output_image_path.resolve(): image for image in resized_images}
@@ -109,6 +77,8 @@ def persist_ocr_markdown(
             source_type = "image"
             source_page_index = None
 
+        print(f"> processing source {source_file_path} image {image_path}")
+
         output_path = _build_output_markdown_path(
             md_temp_dir=md_temp_dir,
             source_file_path=source_file_path,
@@ -116,22 +86,11 @@ def persist_ocr_markdown(
             source_page_index=source_page_index,
         )
         if output_path.exists() and not overwrite:
-            raise FileExistsError(
-                f"Markdown output already exists: {output_path}. "
-                "Re-run with --overwrite to replace existing markdown outputs."
-            )
-
-        header = _format_metadata_header(
-            source_file_path=source_file_path,
-            source_type=source_type,
-            source_page_index=source_page_index,
-            generated_at_utc=generated_at_utc,
-            model_name=model_name,
-            image_width=resized.resized_width,
-            image_height=resized.resized_height,
-            estimated_vision_tokens=token_report.estimated_tokens,
-        )
-        output_path.write_text(header + response.markdown_text.strip() + "\n", encoding="utf-8")
+            print(f"> skipping file {output_path}: already exist")
+            was_written = False
+        else:
+            output_path.write_text(response.markdown_text.strip() + "\n", encoding="utf-8")
+            was_written = True
 
         persisted.append(
             PersistedMarkdownRecord(
@@ -141,6 +100,7 @@ def persist_ocr_markdown(
                 source_page_index=source_page_index,
                 output_markdown_path=output_path,
                 estimated_vision_tokens=token_report.estimated_tokens,
+                was_written=was_written,
             )
         )
 

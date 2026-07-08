@@ -28,12 +28,21 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--md-temp-dir", default=None)
     parser.add_argument("--log-file", default=None)
     parser.add_argument(
+        "--ocr-model-endpoint-url",
         "--model-endpoint-url",
+        dest="ocr_model_endpoint_url",
         default="http://127.0.0.1:8080/v1/chat/completions",
     )
-    parser.add_argument("--model-name", default="lightonocr-2")
-    parser.add_argument("--request-timeout-seconds", type=float, default=120.0)
-    parser.add_argument("--request-max-retries", type=int, default=2)
+    parser.add_argument("--ocr-model-name", "--model-name", dest="ocr_model_name", default="lightonocr-2")
+    parser.add_argument("--ocr-request-timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--ocr-request-max-retries", type=int, default=2)
+    parser.add_argument(
+        "--summary-model-endpoint-url",
+        default="http://localhost:8081/v1/chat/completions",
+    )
+    parser.add_argument("--summary-model-name", default="qwen3-1.7b")
+    parser.add_argument("--summary-request-timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--summary-request-max-retries", type=int, default=2)
     parser.add_argument("--max-longest-edge-px", type=int, default=1540)
     parser.add_argument("--token-threshold", type=int, default=16000)
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=True)

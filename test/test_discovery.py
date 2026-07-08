@@ -81,3 +81,33 @@ def test_discovery_raises_when_input_path_is_missing(tmp_path: Path) -> None:
         assert str(missing.resolve()) in str(exc)
     else:
         raise AssertionError("Expected FileNotFoundError for missing path")
+
+
+def test_discovery_excludes_generated_artifact_directories(tmp_path: Path) -> None:
+    source_dir = tmp_path / "data"
+    source_dir.mkdir()
+
+    source_image = source_dir / "scan.jpg"
+    source_image.touch()
+
+    im_temp_dir = source_dir / "im-temp"
+    md_temp_dir = source_dir / "md-temp"
+    output_dir = source_dir / "output"
+    logs_dir = source_dir / "logs"
+
+    im_temp_dir.mkdir()
+    md_temp_dir.mkdir()
+    output_dir.mkdir()
+    logs_dir.mkdir()
+
+    (im_temp_dir / "scan-processed.jpg").touch()
+    (md_temp_dir / "scan-processed.png").touch()
+    (output_dir / "report.pdf").touch()
+    (logs_dir / "from_logs.jpg").touch()
+
+    args = _build_args(source=[str(source_dir)], source_list_file=[])
+    config = build_config_from_args(args)
+
+    work_items = build_work_items(config)
+
+    assert tuple(item.source_path for item in work_items) == (source_image.resolve(),)

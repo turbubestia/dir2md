@@ -17,7 +17,15 @@ class PathSettings:
 
 
 @dataclass(frozen=True)
-class ModelSettings:
+class OcrModelSettings:
+    endpoint_url: str
+    model_name: str
+    request_timeout_seconds: float
+    request_max_retries: int
+
+
+@dataclass(frozen=True)
+class SummaryModelSettings:
     endpoint_url: str
     model_name: str
     request_timeout_seconds: float
@@ -39,7 +47,8 @@ class RuntimeSettings:
 @dataclass(frozen=True)
 class AppConfig:
     paths: PathSettings
-    model: ModelSettings
+    ocr_model: OcrModelSettings
+    summary_model: SummaryModelSettings
     image: ImageSettings
     runtime: RuntimeSettings
 
@@ -83,6 +92,16 @@ def _resolve_optional_path(raw_value: str | None, fallback: Path) -> Path:
     return Path(raw_value).expanduser().resolve()
 
 
+def _arg_with_fallback(args: SimpleNamespace, preferred: str, fallback: str) -> str:
+    preferred_value = getattr(args, preferred, None)
+    if preferred_value is not None:
+        return str(preferred_value)
+    fallback_value = getattr(args, fallback, None)
+    if fallback_value is not None:
+        return str(fallback_value)
+    raise AttributeError(f"Missing required argument values: {preferred} and {fallback}")
+
+
 def build_config_from_args(args: SimpleNamespace) -> AppConfig:
     source_paths = _normalize_paths(args.source)
     source_list_files = _normalize_paths(args.source_list_file)
@@ -96,11 +115,19 @@ def build_config_from_args(args: SimpleNamespace) -> AppConfig:
             md_temp_dir=_resolve_optional_path(args.md_temp_dir, base_dir / "md-temp"),
             log_file=_resolve_optional_path(args.log_file, base_dir / "logs" / "md-gen.log"),
         ),
-        model=ModelSettings(
-            endpoint_url=args.model_endpoint_url,
-            model_name=args.model_name,
-            request_timeout_seconds=args.request_timeout_seconds,
-            request_max_retries=args.request_max_retries,
+        ocr_model=OcrModelSettings(
+            endpoint_url=_arg_with_fallback(args, "ocr_model_endpoint_url", "model_endpoint_url"),
+            model_name=_arg_with_fallback(args, "ocr_model_name", "model_name"),
+            request_timeout_seconds=float(
+                _arg_with_fallback(args, "ocr_request_timeout_seconds", "request_timeout_seconds")
+            ),
+            request_max_retries=int(_arg_with_fallback(args, "ocr_request_max_retries", "request_max_retries")),
+        ),
+        summary_model=SummaryModelSettings(
+            endpoint_url=getattr(args, "summary_model_endpoint_url", "http://localhost:8081/v1/chat/completions"),
+            model_name=getattr(args, "summary_model_name", "qwen3-1.7b"),
+            request_timeout_seconds=getattr(args, "summary_request_timeout_seconds", 120.0),
+            request_max_retries=getattr(args, "summary_request_max_retries", 2),
         ),
         image=ImageSettings(
             max_longest_edge_px=args.max_longest_edge_px,

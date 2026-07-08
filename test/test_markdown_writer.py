@@ -63,9 +63,9 @@ def test_persist_ocr_markdown_writes_metadata_and_traceability_for_image_source(
     assert len(records) == 1
     output_path = records[0].output_markdown_path
     content = output_path.read_text(encoding="utf-8")
-    assert "source_type: image" in content
-    assert f"source_file_path: {source_image.as_posix()}" in content
-    assert "estimated_vision_tokens: 585" in content
+    assert records[0].was_written is True
+    assert records[0].source_type == "image"
+    assert records[0].source_file_path == source_image.resolve()
     assert "# Title" in content
 
 
@@ -107,6 +107,49 @@ def test_persist_ocr_markdown_sets_pdf_page_metadata(tmp_path: Path) -> None:
     )
 
     content = records[0].output_markdown_path.read_text(encoding="utf-8")
-    assert "source_type: pdf_page" in content
-    assert "source_page_index: 1" in content
-    assert f"source_file_path: {source_pdf.as_posix()}" in content
+    assert records[0].source_type == "pdf_page"
+    assert records[0].source_page_index == 1
+    assert records[0].source_file_path == source_pdf.resolve()
+    assert content.strip() == "content"
+
+
+def test_persist_ocr_markdown_skips_existing_output_without_overwrite(tmp_path: Path, capsys) -> None:
+    source_image = tmp_path / "scan.png"
+    source_image.write_bytes(b"x")
+    processed_image = tmp_path / "im-temp" / "scan-proc.png"
+    processed_image.parent.mkdir(parents=True)
+    processed_image.write_bytes(b"x")
+
+    resized = _resize_result(source=source_image, output=processed_image, width=1000, height=600)
+    report = _token_report(processed_image, tokens=585)
+    response = OcrResponse(
+        image_path=processed_image,
+        model_name="lightonocr-2",
+        markdown_text="# Title\n\nBody",
+        raw_response={},
+    )
+
+    md_temp_dir = tmp_path / "md-temp"
+    first = persist_ocr_markdown(
+        ocr_responses=(response,),
+        pdf_pages=tuple(),
+        resized_images=(resized,),
+        token_reports=(report,),
+        md_temp_dir=md_temp_dir,
+        model_name="lightonocr-2",
+        overwrite=False,
+    )
+    second = persist_ocr_markdown(
+        ocr_responses=(response,),
+        pdf_pages=tuple(),
+        resized_images=(resized,),
+        token_reports=(report,),
+        md_temp_dir=md_temp_dir,
+        model_name="lightonocr-2",
+        overwrite=False,
+    )
+
+    assert first[0].was_written is True
+    assert second[0].was_written is False
+    captured = capsys.readouterr()
+    assert "skipping file" in captured.out
