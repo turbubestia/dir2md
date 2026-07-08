@@ -1,18 +1,44 @@
 # dir2md
 
-Convert PDF or image files to markdown using a local-first OCR pipeline.
+Local-first tooling for turning PDFs and images into markdown, then merging related loose scans into unified documents.
 
-## Phase 1 Status (Goal 2.2.1)
+## Current Status
 
-Phase 1 provides a dependency-ready foundation for `md-gen`:
-- runtime and test dependencies managed with `uv`
-- typed runtime configuration model
-- CLI entrypoint scaffold (`md-gen`)
-- artifact directory bootstrap for `im-temp`, `md-temp`, and log parent path
+The project now has two working command-line modules:
 
-No OCR business logic is implemented in this phase.
+- `md-gen` prepares OCR inputs and writes per-source metadata and markdown artifacts in a deterministic local pipeline.
+- `md-mrg` consumes the metadata JSON produced by `md-gen`, plans how loose pages should be grouped, and applies the plan to generate merged markdown and PDF outputs.
 
-## Linux Setup (Ubuntu/Debian)
+The workflow is intentionally split so the OCR stage and the merge stage stay independently testable. `md-gen` focuses on document ingestion and page-level output generation. `md-mrg` focuses on document reconstruction, reviewable merge planning, and final output assembly.
+
+## What Each Module Does
+
+### `md-gen`
+
+`md-gen` is the OCR and artifact-preparation entrypoint. It:
+
+- discovers source files from a file, directory, repeated `--source`, or `--source-list-file`
+- rasterizes PDF pages into `im-temp`
+- resizes images to the configured model limit
+- estimates token budget per page before OCR
+- calls the local llama.cpp-compatible OCR and summary endpoints
+- writes OCR markdown and metadata into `md-temp`
+- records provenance so later stages can trace where each fragment came from
+
+### `md-mrg`
+
+`md-mrg` is the merge and apply entrypoint. It:
+
+- loads the JSON metadata produced by `md-gen`
+- separates verified sequences from loose page scans
+- scores candidate page links using either a heuristic scorer or a local LLM scorer
+- writes a merge plan JSON file into `mg-temp`
+- applies the plan to concatenate markdown, build merged PDFs, and propose output filenames
+- preserves overwrite behavior so existing outputs are not replaced unless requested
+
+## Setup
+
+### Linux Setup (Ubuntu/Debian)
 
 Install Python and image build dependencies:
 
@@ -37,128 +63,93 @@ Install project dependencies with `uv`:
 uv sync
 ```
 
-## CLI Foundation
+## Using `md-gen`
 
-Run the Phase 1 bootstrap command:
+Run the OCR foundation pipeline on a file or directory:
 
 ```bash
-uv run md-gen --source ./samples --dry-run
+uv run md-gen \
+	--source ./samples/invoice-set \
+	--no-dry-run \
+	--overwrite
 ```
 
-Useful options:
-- `--source` (repeatable): source file or directory inputs
-- `--source-list-file` (repeatable): text file with one source path per line (`#` comment lines supported)
-- `--output-dir`: future normalized output location (default: `<source-base>/output`)
-- `--im-temp-dir`: temporary rasterized/preprocessed image path (default: `<source-base>/im-temp`)
-- `--md-temp-dir`: temporary markdown output path (default: `<source-base>/md-temp`)
-- `--log-file`: plain text log destination (default: `<source-base>/logs/md-gen.log`)
-- `--model-endpoint-url`: local llama.cpp-compatible endpoint
-- `--model-name`: OCR model identifier
-- `--max-longest-edge-px`: image longest-edge limit (default `1540`)
-- `--token-threshold`: OCR token budget threshold (default `16000`)
-- `--dry-run` / `--no-dry-run`
-- `--overwrite`
+Common options:
 
-Default path behavior:
-- when a single source directory is provided, temp folders and logs are created inside that directory
-- when a single source file is provided, temp folders and logs are created next to that file
-- explicit path arguments always override defaults
+- `--source` can be repeated for multiple file or directory inputs
+- `--source-list-file` can be repeated for file lists with one path per line
+- `--output-dir` overrides the final output directory
+- `--im-temp-dir` overrides the temporary rasterized image directory
+- `--md-temp-dir` overrides the temporary markdown directory
+- `--log-file` overrides the plain-text run log path
+- `--ocr-model-endpoint-url` sets the local OCR endpoint
+- `--ocr-model-name` sets the OCR model identifier
+- `--summary-model-endpoint-url` sets the local summary endpoint
+- `--summary-model-name` sets the summary model identifier
+- `--max-longest-edge-px` sets the image resize limit
+- `--token-threshold` sets the token budget threshold
+- `--dry-run` skips OCR and markdown persistence
+- `--overwrite` replaces existing markdown outputs
 
-## Phase 2 Discovery Rules
+Example with explicit paths:
 
-- Supported source file types: PDF (`.pdf`) and images (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`)
-- Input modes: single file, directory scan (recursive), repeated `--source`, and repeated `--source-list-file`
-- Discovery deduplicates repeated paths from all sources
-- Work-item ordering is deterministic by normalized path ordering
+```bash
+uv run md-gen \
+	--source /data/scans/invoice-a.pdf \
+	--source /data/scans/invoice-b.jpg \
+	--im-temp-dir /data/work/im-temp \
+	--md-temp-dir /data/work/md-temp \
+	--log-file /data/work/logs/md-gen.log \
+	--no-dry-run
+```
 
-## Phase 3 PDF Rasterization Rules
+## Using `md-mrg`
 
-- PDF rendering uses `pypdfium2`
-- Rasterized pages are written as PNG files in `im-temp`
-- Output naming is deterministic: sanitized source stem + source hash + page number (e.g. `file-a1b2c3d4e5-p0001.png`)
-- Page metadata tracks source path, source order index, page index/number, total pages, and output dimensions
-- Error mapping categories for PDF failures:
-	- `missing_input`
-	- `encrypted_pdf`
-	- `corrupted_pdf`
-	- `unreadable_pdf`
+Plan a merge from the metadata generated by `md-gen`:
 
-## Phase 4 Image Resizing Rules
+```bash
+uv run md-mrg plan \
+	--md-temp-dir /data/work/md-temp \
+	--mg-temp-dir /data/work/mg-temp \
+	--edge-scorer heuristic
+```
 
-- Image processing uses `Pillow`
-- Longest-edge policy: images above `1540` are downscaled while preserving aspect ratio
-- Images at or below the limit keep their dimensions unchanged
-- Source images outside `im-temp` are copied into `im-temp` with deterministic hashed names
-- Rasterized PDF page images already in `im-temp` are resized in place when needed
-- Validation rule: post-resize dimensions must be positive and longest edge must be `<= max_longest_edge_px`
+Apply the generated plan to write merged markdown and PDFs:
 
-## Phase 5 Token Budget Rules
+```bash
+uv run md-mrg apply \
+	--merge-batch-file /data/work/mg-temp/merge-plan.json \
+	--output-dir /data/work/output \
+	--md-temp-dir /data/work/md-temp \
+	--im-temp-dir /data/work/im-temp \
+	--overwrite
+```
 
-- Formula: image tokens = (width * height) / 1024 using post-resize dimensions
-- Token estimates are integer-truncated for deterministic checks
-- Threshold validation runs per image before OCR submission
-- Status contract per image:
-	- `ok`: comfortably within threshold
-	- `warning`: near threshold (>= 90 percent)
-	- `error`: exceeds threshold (run fails)
+Common `md-mrg` options:
 
-## Phase 6 Local Gateway Rules
+- `plan` supports `--edge-scorer heuristic|llm`
+- `plan` supports `--rolling-window`, `--llm-endpoint-url`, `--llm-model-name`, `--llm-timeout-seconds`, and `--llm-max-retries`
+- `apply` supports `--naming-endpoint-url`, `--naming-model-name`, `--naming-timeout-seconds`, and `--naming-max-retries`
+- both commands support `--overwrite` where applicable
 
-- Transport uses local llama.cpp endpoint with OpenAI Vision-compatible payload shape
-- Request payload includes `messages` content blocks for text prompt and base64 image data URL
-- Sequential request flow is preserved
-- Timeout and retry behavior is configurable via:
-	- `--request-timeout-seconds`
-	- `--request-max-retries`
-- Structured error categories:
-	- `connection_error`
-	- `model_unavailable_error`
-	- `invalid_payload_error`
-	- `inference_timeout_error`
-- OCR execution is performed only when `--no-dry-run` is used
+## Repository Layout
 
-## Phase 7 Markdown Persistence Rules
+- `src/md_gen`: OCR ingestion, source discovery, rasterization, resizing, token budgeting, and markdown persistence
+- `src/md_mrg`: merge planning and merge execution for loose page reconstruction
+- `src/common`: shared llama.cpp-compatible gateway code
+- `design/`: architecture notes, implementation plans, and issue docs
+- `test/`: unit and integration tests
 
-- OCR markdown is written to `md-temp`
-- Each output includes a stable metadata header with provenance fields:
-	- `source_file_name`
-	- `source_file_path`
-	- `source_type`
-	- `source_page_index` (for PDF pages)
-	- `generated_at_utc`
-	- `model_name`
-	- `image_dimensions`
-	- `estimated_vision_tokens`
-- Output markdown names are deterministic and include source-derived hashes
-- If a destination markdown exists and `--overwrite` is not enabled, persistence fails to prevent silent replacement
-- Re-running on the same source set should use `--overwrite` when you want to refresh markdown outputs
+## Notes
 
-## Phase 8 Artifact Management Rules
+- The project uses `uv` for dependency management and execution.
+- Local llama.cpp-compatible services are expected to be running separately.
+- The merge workflow uses a single scorer per planning run; choose either heuristic or LLM scoring when invoking `md-mrg plan`.
 
-- Temp artifact directories are created as needed:
-	- `im-temp` for rasterized and resized images
-	- `md-temp` for OCR markdown outputs
-- Dry-run mode (`--dry-run`) only produces temporary image artifacts and never writes markdown outputs
-- Dry-run and analysis flows do not mutate source files
-- Markdown overwrite behavior is explicit:
-	- default mode fails if a target markdown file already exists
-	- `--overwrite` allows deterministic replacement
-- `output` is reserved for later normalization phases and is not written during foundation execution
+## Validation
 
-## Phase 9 Logging and Observability Rules
+Run the test suite with:
 
-- Logging uses plain text lines written to `--log-file` (default `<source-base>/logs/md-gen.log`)
-- Each run records:
-	- `RUN_START` with timestamp and runtime flags
-	- one `STAGE` entry per pipeline stage with status and duration
-	- `RUN_SUMMARY` with totals and final status
-- Dry-run stages for OCR and markdown persistence are logged with `status=skipped`
-- Failure paths append a failed run summary with the exception type for basic diagnostics
-
-## Phase 10 Validation and Test Coverage
-
-- Unit coverage includes discovery ordering, rasterization metadata/error mapping, resizing policy, token budget checks, gateway retry/error handling, and markdown metadata persistence
-- Foundation integration tests cover:
-	- dry-run artifact behavior and skipped persistence
-	- overwrite enforcement for markdown outputs
-	- run-level failure summary logging
+```bash
+uv run pytest -q
+```

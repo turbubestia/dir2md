@@ -1,10 +1,6 @@
-"""Compatibility shim for shared llama gateway connectors.
+"""Shared connectors and utilities across modules."""
 
-The canonical implementation now lives in `common.llama_gateway` so both
-`md_gen` and `md_mrg` can reuse the same transport behavior.
-"""
-
-from common.llama_gateway import (
+from .llama_gateway import (
     BridgeScoreRequest,
     BridgeScoreResponse,
     GatewayError,
