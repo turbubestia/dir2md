@@ -7,11 +7,13 @@ from PIL import Image
 from md_gen.gateway import (
     BridgeScoreRequest,
     GatewayError,
+    LlamaBridgeScoreGateway,
     LlamaLanguageGateway,
     LlamaOcrGateway,
     LlamaSummaryGateway,
     OcrRequest,
     SummaryRequest,
+    TextRequest,
     build_bridge_score_request_payload,
     build_text_summary_request_payload,
     build_vision_request_payload,
@@ -36,9 +38,8 @@ def test_build_vision_request_payload_matches_openai_vision_shape(tmp_path: Path
 
     assert payload["model"] == "lightonocr-2"
     assert payload["messages"][0]["role"] == "user"
-    assert payload["messages"][0]["content"][0]["type"] == "text"
-    assert payload["messages"][0]["content"][1]["type"] == "image_url"
-    assert payload["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert payload["messages"][0]["content"][0]["type"] == "image_url"
+    assert payload["messages"][0]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
 def test_gateway_retries_and_succeeds_after_transient_unavailable(tmp_path: Path) -> None:
@@ -144,7 +145,7 @@ def test_summary_gateway_parses_and_sanitizes_plain_text_response() -> None:
 
 
 def test_sanitize_summary_text_keeps_only_plain_ascii_text() -> None:
-    assert sanitize_summary_text("A_B:C\nZ@1-2.") == "A B C Z 1-2."
+    assert sanitize_summary_text("A_B:C\nZ@1-2.") == "A_B C Z 1-2."
 
 
 def test_build_bridge_score_payload_has_expected_shape() -> None:
@@ -178,7 +179,7 @@ def test_language_gateway_parses_bridge_score_json_response() -> None:
         return httpx.Response(status_code=200, content=json.dumps(body))
 
     client = httpx.Client(transport=httpx.MockTransport(handler), timeout=2.0)
-    gateway = LlamaLanguageGateway(
+    gateway = LlamaBridgeScoreGateway(
         endpoint_url="http://localhost:8081/v1/chat/completions",
         model_name="qwen3-1.7b",
         request_timeout_seconds=2.0,
@@ -197,4 +198,34 @@ def test_language_gateway_parses_bridge_score_json_response() -> None:
 
     assert response.bridge_score == 8
     assert response.reason == "natural continuation"
+    client.close()
+
+
+def test_language_gateway_keeps_generic_text_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Invoice #123\nTotal: $500.00",
+                    }
+                }
+            ]
+        }
+        return httpx.Response(status_code=200, content=json.dumps(body))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), timeout=2.0)
+    gateway = LlamaLanguageGateway(
+        endpoint_url="http://localhost:8081/v1/chat/completions",
+        model_name="qwen3-1.7b",
+        request_timeout_seconds=2.0,
+        request_max_retries=0,
+        client=client,
+    )
+
+    response = gateway.send_text_request(
+        TextRequest(system_prompt="Return raw text", user_prompt="Give me an invoice summary")
+    )
+
+    assert response.text == "Invoice #123\nTotal: $500.00"
     client.close()

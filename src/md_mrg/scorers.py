@@ -6,7 +6,7 @@ from time import perf_counter
 
 from rapidfuzz import fuzz
 
-from common.llama_gateway import BridgeScoreRequest, GatewayError, LlamaLanguageGateway
+from common.llama_gateway import BridgeScoreRequest, GatewayError, LlamaBridgeScoreGateway
 
 from .models import CandidateEdge, DecisionStatus, EdgeScore
 
@@ -107,7 +107,7 @@ class LlmEdgeScorer(EdgeScorer):
 
     def score_edges(self, candidates: tuple[CandidateEdge, ...]) -> tuple[EdgeScore, ...]:
         scored: list[EdgeScore] = []
-        with LlamaLanguageGateway(
+        with LlamaBridgeScoreGateway(
             endpoint_url=self.endpoint_url,
             model_name=self.model_name,
             request_timeout_seconds=self.timeout_seconds,
