@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from md_gen.gateway import OcrResponse
+from common.llama_gateway import OcrResponse
 from md_gen.markdown_writer import PersistedMarkdownRecord
 from md_gen.metadata_writer import persist_document_metadata
 
@@ -57,7 +57,7 @@ def test_persist_document_metadata_groups_pdf_pages_in_single_json(tmp_path: Pat
         markdown_records=records,
         ocr_responses=ocr_responses,
         summary_by_image_path=summaries,
-        md_temp_dir=tmp_path / "md-temp",
+        metadata_temp_dir=tmp_path / "metadata-temp",
         overwrite=True,
     )
 
@@ -100,7 +100,7 @@ def test_persist_document_metadata_marks_single_image_as_unverified_sequence(tmp
         markdown_records=records,
         ocr_responses=ocr_responses,
         summary_by_image_path={processed_image.resolve(): "summary [bad] chars? OK-12."},
-        md_temp_dir=tmp_path / "md-temp",
+        metadata_temp_dir=tmp_path / "metadata-temp",
         overwrite=True,
     )
 
@@ -141,7 +141,7 @@ def test_persist_document_metadata_deduplicates_duplicate_fragment_records(tmp_p
         markdown_records=records,
         ocr_responses=ocr_responses,
         summary_by_image_path={processed_image.resolve(): "summary"},
-        md_temp_dir=tmp_path / "md-temp",
+        metadata_temp_dir=tmp_path / "metadata-temp",
         overwrite=True,
     )
 

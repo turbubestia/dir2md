@@ -134,7 +134,7 @@ class OcrResponse:
 
 def _mime_type_for_path(path: Path) -> str:
     suffix = path.suffix.lower()
-    if suffix in {".jpg", ".jpeg"}:
+    if suffix in {".jpg", ".jpeg", ".jpge"}:
         return "image/jpeg"
     if suffix == ".webp":
         return "image/webp"
@@ -262,6 +262,7 @@ class LlamaLanguageGateway(_BaseGateway):
 @dataclass(frozen=True)
 class SummaryRequest:
     source_text: str
+    system_prompt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -272,7 +273,7 @@ class SummaryResponse:
     raw_response: dict[str, Any]
 
 def build_text_summary_request_payload(model_name: str, request: SummaryRequest) -> dict[str, Any]:
-    system_prompt = (
+    default_system_prompt = (
         "You are an automated data-extraction parser. You process OCR text and output a concise summary "
         "no longer than three lines.\n\n"
         "CRITICAL INSTRUCTIONS:\n"
@@ -281,6 +282,7 @@ def build_text_summary_request_payload(model_name: str, request: SummaryRequest)
         "- Return only plain text summary content.\n"
         "- Avoid markdown formatting."
     )
+    system_prompt = request.system_prompt.strip() if isinstance(request.system_prompt, str) and request.system_prompt.strip() else default_system_prompt
     return {
         "model": model_name,
         "messages": [

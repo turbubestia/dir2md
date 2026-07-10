@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
-from md_gen.gateway import (
+from common.llama_gateway import (
     BridgeScoreRequest,
     GatewayError,
     LlamaBridgeScoreGateway,
@@ -114,6 +114,15 @@ def test_build_text_summary_payload_uses_system_and_user_messages() -> None:
     assert payload["messages"][1]["role"] == "user"
     assert payload["messages"][1]["content"] == "OCR markdown output"
     assert payload["temperature"] == 0
+
+
+def test_build_text_summary_payload_allows_custom_system_prompt() -> None:
+    payload = build_text_summary_request_payload(
+        model_name="qwen3-1.7b",
+        request=SummaryRequest(source_text="OCR markdown output", system_prompt="custom prompt"),
+    )
+
+    assert payload["messages"][0]["content"] == "custom prompt"
 
 
 def test_summary_gateway_parses_and_sanitizes_plain_text_response() -> None:

@@ -1,76 +1,33 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter
 from typing import Callable, TypeVar
 
-from .config import AppConfig
+from .config import AppConfig, ConfigValidationError
 from .discovery import WorkItem, build_work_items
-from .gateway import (
+
+from common.llama_gateway import (
     GatewayError,
-    LlamaOcrGateway,
-    LlamaSummaryGateway,
     OcrResponse,
+    LlamaOcrGateway,
     SummaryRequest,
+    LlamaSummaryGateway,
     build_default_ocr_requests,
 )
+
 from .markdown_writer import PersistedMarkdownRecord, persist_ocr_markdown
 from .metadata_writer import PersistedMetadataRecord, persist_document_metadata
 from .rasterizer import PdfPageRaster, rasterize_pdf_work_items
 from .resizer import ImageResizeResult, resize_images_for_ocr
-from .token_budget import ImageTokenBudgetReport, enforce_token_budget, evaluate_token_budget_for_images
+from .token_budget import (
+    ImageTokenBudgetReport,
+    TokenBudgetValidationError,
+    enforce_token_budget,
+    evaluate_token_budget_for_images,
+)
 
 T = TypeVar("T")
-
-
-class PlainTextRunLogger:
-    def __init__(self, log_file: Path):
-        self._log_file = log_file
-
-    def _append_line(self, message: str) -> None:
-        with self._log_file.open("a", encoding="utf-8") as handle:
-            handle.write(message + "\n")
-
-    def log_run_start(self, *, dry_run: bool, overwrite: bool, model_name: str, source_count: int) -> None:
-        timestamp = datetime.now(timezone.utc).isoformat()
-        self._append_line(
-            "RUN_START "
-            f"timestamp={timestamp} dry_run={dry_run} overwrite={overwrite} "
-            f"model={model_name} source_count={source_count}"
-        )
-
-    def log_stage(self, *, stage: str, status: str, duration_seconds: float, detail: str = "") -> None:
-        detail_suffix = f" detail={detail}" if detail else ""
-        self._append_line(
-            f"STAGE name={stage} status={status} duration_seconds={duration_seconds:.3f}{detail_suffix}"
-        )
-
-    def log_run_summary(
-        self,
-        *,
-        status: str,
-        duration_seconds: float,
-        discovered_work_items: int,
-        rasterized_pages: int,
-        resized_images: int,
-        token_warnings: int,
-        token_errors: int,
-        summary_failures: int,
-        persisted_markdown: int,
-        persisted_metadata: int,
-        error: str | None = None,
-    ) -> None:
-        error_suffix = f" error={error}" if error else ""
-        self._append_line(
-            "RUN_SUMMARY "
-            f"status={status} duration_seconds={duration_seconds:.3f} "
-            f"discovered_work_items={discovered_work_items} rasterized_pages={rasterized_pages} "
-            f"resized_images={resized_images} token_warnings={token_warnings} token_errors={token_errors} "
-            f"summary_failures={summary_failures} persisted_markdown={persisted_markdown} "
-            f"persisted_metadata={persisted_metadata}{error_suffix}"
-        )
 
 
 @dataclass(frozen=True)
@@ -81,17 +38,55 @@ class SummaryAttempt:
     error_code: str | None
 
 
-def _time_stage(action: Callable[[], T]) -> tuple[T, float]:
-    started = perf_counter()
-    result = action()
-    duration = perf_counter() - started
-    return result, duration
+def _emit_stage(stage: str, *, status: str, detail: str = "") -> None:
+    detail_token = f" detail={detail}" if detail else ""
+    print(f"STAGE name={stage} status={status}{detail_token}")
+
+
+def _emit_error(error_code: str, message: str) -> None:
+    print(f"ERROR code={error_code} message={message}")
+
+
+def _time_stage(action: Callable[[], T]) -> T:
+    return action()
+
+
+def _load_prompt_file(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    return text
+
+
+def load_summary_system_prompt(config: AppConfig) -> str:
+    override_path = config.prompts.summary_prompt_override_path
+    default_path = config.prompts.summary_prompt_default_path
+
+    if override_path is not None:
+        override_text = _load_prompt_file(override_path)
+        if override_text is not None:
+            print(f"PROMPT status=loaded source=override path={override_path}")
+            return override_text
+        print(f"PROMPT status=fallback source=override_unreadable path={override_path}")
+
+    default_text = _load_prompt_file(default_path)
+    if default_text is not None:
+        print(f"PROMPT status=loaded source=default path={default_path}")
+        return default_text
+
+    print("PROMPT status=fallback source=builtin")
+    return config.prompts.summary_prompt_builtin_text
 
 
 def ensure_phase_one_directories(config: AppConfig) -> None:
+    config.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    config.paths.temp_dir.mkdir(parents=True, exist_ok=True)
     config.paths.im_temp_dir.mkdir(parents=True, exist_ok=True)
     config.paths.md_temp_dir.mkdir(parents=True, exist_ok=True)
-    config.paths.log_file.parent.mkdir(parents=True, exist_ok=True)
+    config.paths.metadata_temp_dir.mkdir(parents=True, exist_ok=True)
 
 
 def prepare_work_items(config: AppConfig) -> tuple[WorkItem, ...]:
@@ -168,16 +163,19 @@ def execute_summaries(
     ocr_responses: tuple[OcrResponse, ...],
 ) -> tuple[SummaryAttempt, ...]:
     attempts: list[SummaryAttempt] = []
+    system_prompt = load_summary_system_prompt(config)
     with LlamaSummaryGateway(
-        endpoint_url=config.summary_model.endpoint_url,
-        model_name=config.summary_model.model_name,
-        request_timeout_seconds=config.summary_model.request_timeout_seconds,
-        request_max_retries=config.summary_model.request_max_retries,
+        endpoint_url=config.language_model.endpoint_url,
+        model_name=config.language_model.model_name,
+        request_timeout_seconds=config.language_model.request_timeout_seconds,
+        request_max_retries=config.language_model.request_max_retries,
     ) as gateway:
         for response in ocr_responses:
             try:
                 print(f"> processing summary for image {response.image_path}")
-                summary_response = gateway.send_summary_request(SummaryRequest(source_text=response.markdown_text))
+                summary_response = gateway.send_summary_request(
+                    SummaryRequest(source_text=response.markdown_text, system_prompt=system_prompt)
+                )
             except GatewayError as exc:
                 attempts.append(
                     SummaryAttempt(
@@ -240,159 +238,65 @@ def persist_metadata(
         markdown_records=persisted_markdown,
         ocr_responses=ocr_responses,
         summary_by_image_path=summary_by_image_path,
-        md_temp_dir=config.paths.md_temp_dir,
+        metadata_temp_dir=config.paths.metadata_temp_dir,
         overwrite=config.runtime.overwrite,
     )
 
 
 def run_foundation_bootstrap(config: AppConfig) -> int:
-    started_at = perf_counter()
-
-    ensure_phase_one_directories(config)
-    logger = PlainTextRunLogger(config.paths.log_file)
-    logger.log_run_start(
-        dry_run=config.runtime.dry_run,
-        overwrite=config.runtime.overwrite,
-        model_name=config.ocr_model.model_name,
-        source_count=len(config.paths.source_paths),
-    )
-
-    work_items: tuple[WorkItem, ...] = tuple()
-    pdf_pages: tuple[PdfPageRaster, ...] = tuple()
-    resized_images: tuple[ImageResizeResult, ...] = tuple()
-    token_reports: tuple[ImageTokenBudgetReport, ...] = tuple()
-    summary_attempts: tuple[SummaryAttempt, ...] = tuple()
-    persisted_records: tuple[PersistedMarkdownRecord, ...] = tuple()
-    metadata_records: tuple[PersistedMetadataRecord, ...] = tuple()
-
     try:
-        work_items, duration = _time_stage(lambda: prepare_work_items(config))
-        logger.log_stage(
-            stage="discover_work_items",
-            status="ok",
-            duration_seconds=duration,
-            detail=f"count={len(work_items)}",
-        )
+        ensure_phase_one_directories(config)
 
-        pdf_pages, duration = _time_stage(lambda: rasterize_pdf_items(config, work_items))
-        logger.log_stage(
-            stage="rasterize_pdf",
-            status="ok",
-            duration_seconds=duration,
-            detail=f"pages={len(pdf_pages)}",
-        )
+        work_items = _time_stage(lambda: prepare_work_items(config))
+        _emit_stage("discover_work_items", status="ok", detail=f"count={len(work_items)}")
 
-        resized_images, duration = _time_stage(lambda: resize_images(config, work_items, pdf_pages))
-        logger.log_stage(
-            stage="resize_images",
-            status="ok",
-            duration_seconds=duration,
-            detail=f"images={len(resized_images)}",
-        )
+        pdf_pages = _time_stage(lambda: rasterize_pdf_items(config, work_items))
+        _emit_stage("rasterize_pdf", status="ok", detail=f"pages={len(pdf_pages)}")
 
-        token_reports, duration = _time_stage(lambda: validate_token_budget(config, resized_images))
+        resized_images = _time_stage(lambda: resize_images(config, work_items, pdf_pages))
+        _emit_stage("resize_images", status="ok", detail=f"images={len(resized_images)}")
+
+        token_reports = _time_stage(lambda: validate_token_budget(config, resized_images))
         warnings = sum(1 for report in token_reports if report.status == "warning")
         errors = sum(1 for report in token_reports if report.status == "error")
-        logger.log_stage(
-            stage="validate_token_budget",
-            status="ok",
-            duration_seconds=duration,
-            detail=f"warnings={warnings} errors={errors}",
-        )
+        _emit_stage("validate_token_budget", status="ok", detail=f"warnings={warnings} errors={errors}")
 
         if config.runtime.dry_run:
-            logger.log_stage(
-                stage="execute_ocr",
-                status="skipped",
-                duration_seconds=0.0,
-                detail="reason=dry_run_enabled",
-            )
-            logger.log_stage(
-                stage="execute_summary",
-                status="skipped",
-                duration_seconds=0.0,
-                detail="reason=dry_run_enabled",
-            )
-            logger.log_stage(
-                stage="persist_markdown",
-                status="skipped",
-                duration_seconds=0.0,
-                detail="reason=dry_run_enabled",
-            )
-            logger.log_stage(
-                stage="persist_metadata",
-                status="skipped",
-                duration_seconds=0.0,
-                detail="reason=dry_run_enabled",
-            )
-        else:
-            ocr_responses, duration = _time_stage(lambda: execute_ocr(config, resized_images))
-            logger.log_stage(
-                stage="execute_ocr",
-                status="ok",
-                duration_seconds=duration,
-                detail=f"responses={len(ocr_responses)}",
-            )
+            _emit_stage("execute_ocr", status="skipped", detail="reason=dry_run_enabled")
+            _emit_stage("execute_summary", status="skipped", detail="reason=dry_run_enabled")
+            _emit_stage("persist_markdown", status="skipped", detail="reason=dry_run_enabled")
+            _emit_stage("persist_metadata", status="skipped", detail="reason=dry_run_enabled")
+            return 0
 
-            summary_attempts, duration = _time_stage(lambda: execute_summaries(config, ocr_responses))
-            summary_failures = sum(1 for attempt in summary_attempts if attempt.failed)
-            logger.log_stage(
-                stage="execute_summary",
-                status="ok",
-                duration_seconds=duration,
-                detail=f"responses={len(summary_attempts)} failures={summary_failures}",
-            )
+        ocr_responses = _time_stage(lambda: execute_ocr(config, resized_images))
+        _emit_stage("execute_ocr", status="ok", detail=f"responses={len(ocr_responses)}")
 
-            persisted_records, duration = _time_stage(
-                lambda: persist_markdown(config, ocr_responses, pdf_pages, resized_images, token_reports)
-            )
-            logger.log_stage(
-                stage="persist_markdown",
-                status="ok",
-                duration_seconds=duration,
-                detail=f"records={len(persisted_records)}",
-            )
+        summary_attempts = _time_stage(lambda: execute_summaries(config, ocr_responses))
+        summary_failures = sum(1 for attempt in summary_attempts if attempt.failed)
+        _emit_stage("execute_summary", status="ok", detail=f"responses={len(summary_attempts)} failures={summary_failures}")
 
-            metadata_records, duration = _time_stage(
-                lambda: persist_metadata(config, persisted_records, ocr_responses, summary_attempts)
-            )
-            logger.log_stage(
-                stage="persist_metadata",
-                status="ok",
-                duration_seconds=duration,
-                detail=f"records={len(metadata_records)}",
-            )
-
-        total_duration = perf_counter() - started_at
-        logger.log_run_summary(
-            status="ok",
-            duration_seconds=total_duration,
-            discovered_work_items=len(work_items),
-            rasterized_pages=len(pdf_pages),
-            resized_images=len(resized_images),
-            token_warnings=sum(1 for report in token_reports if report.status == "warning"),
-            token_errors=sum(1 for report in token_reports if report.status == "error"),
-            summary_failures=sum(1 for attempt in summary_attempts if attempt.failed),
-            persisted_markdown=len(persisted_records),
-            persisted_metadata=len(metadata_records),
+        persisted_records = _time_stage(
+            lambda: persist_markdown(config, ocr_responses, pdf_pages, resized_images, token_reports)
         )
+        _emit_stage("persist_markdown", status="ok", detail=f"records={len(persisted_records)}")
+
+        metadata_records = _time_stage(
+            lambda: persist_metadata(config, persisted_records, ocr_responses, summary_attempts)
+        )
+        _emit_stage("persist_metadata", status="ok", detail=f"records={len(metadata_records)}")
         return 0
+    except ConfigValidationError as exc:
+        _emit_error(exc.error_code, str(exc))
+        return 2
+    except TokenBudgetValidationError as exc:
+        _emit_error("token_budget_exceeded", str(exc))
+        return 3
+    except GatewayError as exc:
+        _emit_error(exc.error_code, str(exc))
+        return 4
     except Exception as exc:
-        total_duration = perf_counter() - started_at
-        logger.log_run_summary(
-            status="failed",
-            duration_seconds=total_duration,
-            discovered_work_items=len(work_items),
-            rasterized_pages=len(pdf_pages),
-            resized_images=len(resized_images),
-            token_warnings=sum(1 for report in token_reports if report.status == "warning"),
-            token_errors=sum(1 for report in token_reports if report.status == "error"),
-            summary_failures=sum(1 for attempt in summary_attempts if attempt.failed),
-            persisted_markdown=len(persisted_records),
-            persisted_metadata=len(metadata_records),
-            error=type(exc).__name__,
-        )
-        raise
+        _emit_error("foundation_runtime_error", f"{type(exc).__name__}: {exc}")
+        return 1
 
 
 def run_phase_one_bootstrap(config: AppConfig) -> int:

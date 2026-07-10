@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
 
-from .gateway import OcrResponse
+from common.llama_gateway import OcrResponse
 from .markdown_writer import PersistedMarkdownRecord
 
 _ALLOWED_TEXT_CHARS = re.compile(r"[^a-zA-Z0-9 .\-]+")
@@ -58,10 +58,10 @@ def _extract_anchor_lines(markdown_text: str) -> tuple[str, str]:
     return first_line, last_line
 
 
-def _build_document_output_json_path(md_temp_dir: Path, source_file_path: Path) -> Path:
+def _build_document_output_json_path(metadata_temp_dir: Path, source_file_path: Path) -> Path:
     source_hash = sha1(source_file_path.as_posix().encode("utf-8")).hexdigest()[:10]
     filename = f"{_sanitize_stem(source_file_path)}-{source_hash}.json"
-    return md_temp_dir / filename
+    return metadata_temp_dir / filename
 
 
 def _build_document_id(source_file_path: Path) -> str:
@@ -72,10 +72,10 @@ def persist_document_metadata(
     markdown_records: tuple[PersistedMarkdownRecord, ...],
     ocr_responses: tuple[OcrResponse, ...],
     summary_by_image_path: dict[Path, str],
-    md_temp_dir: Path,
+    metadata_temp_dir: Path,
     overwrite: bool,
 ) -> tuple[PersistedMetadataRecord, ...]:
-    md_temp_dir.mkdir(parents=True, exist_ok=True)
+    metadata_temp_dir.mkdir(parents=True, exist_ok=True)
 
     ocr_by_image = {response.image_path.resolve(): response for response in ocr_responses}
     grouped: dict[Path, list[PersistedMarkdownRecord]] = {}
@@ -145,7 +145,10 @@ def persist_document_metadata(
             "fragments": fragments,
         }
 
-        output_json_path = _build_document_output_json_path(md_temp_dir=md_temp_dir, source_file_path=source_file_path)
+        output_json_path = _build_document_output_json_path(
+            metadata_temp_dir=metadata_temp_dir,
+            source_file_path=source_file_path,
+        )
         if output_json_path.exists() and not overwrite:
             print(f"> skipping file {output_json_path}: already exist")
             was_written = False

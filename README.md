@@ -17,12 +17,13 @@ The workflow is intentionally split so the OCR stage and the merge stage stay in
 
 `md-gen` is the OCR and artifact-preparation entrypoint. It:
 
-- discovers source files from a file, directory, repeated `--source`, or `--source-list-file`
-- rasterizes PDF pages into `im-temp`
+- scans one source directory level (non-recursive) and consumes only `.pdf`, `.png`, `.jpg`, `.jpge`
+- rasterizes PDF pages into `output/temp/images`
 - resizes images to the configured model limit
 - estimates token budget per page before OCR
 - calls the local llama.cpp-compatible OCR and summary endpoints
-- writes OCR markdown and metadata into `md-temp`
+- writes OCR markdown into `output/temp/markdown`
+- writes metadata JSON into `output/temp/metadata`
 - records provenance so later stages can trace where each fragment came from
 
 ### `md-mrg`
@@ -65,27 +66,24 @@ uv sync
 
 ## Using `md-gen`
 
-Run the OCR foundation pipeline on a file or directory:
+Run the OCR foundation pipeline:
 
 ```bash
 uv run md-gen \
 	--source ./samples/invoice-set \
-	--no-dry-run \
+	--output ./samples/out \
 	--overwrite
 ```
 
 Common options:
 
-- `--source` can be repeated for multiple file or directory inputs
-- `--source-list-file` can be repeated for file lists with one path per line
-- `--output-dir` overrides the final output directory
-- `--im-temp-dir` overrides the temporary rasterized image directory
-- `--md-temp-dir` overrides the temporary markdown directory
-- `--log-file` overrides the plain-text run log path
+- `--source` is required and must be an existing directory
+- `--output` is required and is auto-created if missing
+- `--summary-prompt` optionally points to a custom summary system-prompt file
 - `--ocr-model-endpoint-url` sets the local OCR endpoint
 - `--ocr-model-name` sets the OCR model identifier
-- `--summary-model-endpoint-url` sets the local summary endpoint
-- `--summary-model-name` sets the summary model identifier
+- `--language-model-endpoint-url` sets the local summary endpoint
+- `--language-model-name` sets the summary model identifier
 - `--max-longest-edge-px` sets the image resize limit
 - `--token-threshold` sets the token budget threshold
 - `--dry-run` skips OCR and markdown persistence
@@ -95,12 +93,9 @@ Example with explicit paths:
 
 ```bash
 uv run md-gen \
-	--source /data/scans/invoice-a.pdf \
-	--source /data/scans/invoice-b.jpg \
-	--im-temp-dir /data/work/im-temp \
-	--md-temp-dir /data/work/md-temp \
-	--log-file /data/work/logs/md-gen.log \
-	--no-dry-run
+	--source /data/scans/incoming \
+	--output /data/work/output \
+	--summary-prompt /data/work/prompts/summary.txt
 ```
 
 ## Using `md-mrg`

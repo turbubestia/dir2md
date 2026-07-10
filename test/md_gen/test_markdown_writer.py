@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from md_gen.gateway import OcrResponse
+from common.llama_gateway import OcrResponse
 from md_gen.markdown_writer import persist_ocr_markdown
 from md_gen.rasterizer import PdfPageRaster
 from md_gen.resizer import ImageResizeResult

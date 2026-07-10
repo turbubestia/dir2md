@@ -9,8 +9,9 @@ from .config import AppConfig
 SourceType = Literal["pdf", "image"]
 
 _PDF_EXTENSIONS = {".pdf"}
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpge"}
 _SUPPORTED_EXTENSIONS = _PDF_EXTENSIONS | _IMAGE_EXTENSIONS
+_DISCOVERY_PREFIX = "DISCOVERY"
 
 
 @dataclass(frozen=True)
@@ -25,74 +26,32 @@ def _ordering_key(path: Path) -> str:
     return path.as_posix().lower()
 
 
-def _iter_paths_from_list_file(list_file_path: Path) -> list[Path]:
-    candidates: list[Path] = []
-    base_dir = list_file_path.parent
-    for raw_line in list_file_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parsed = Path(line).expanduser()
-        if not parsed.is_absolute():
-            parsed = (base_dir / parsed).resolve()
-        else:
-            parsed = parsed.resolve()
-        candidates.append(parsed)
-    return candidates
+def _print_discovery_status(path: Path, *, status: str, reason: str = "") -> None:
+    reason_token = f" reason={reason}" if reason else ""
+    print(f"{_DISCOVERY_PREFIX} status={status} path={path.resolve()}{reason_token}")
 
 
-def _collect_candidate_paths(config: AppConfig) -> list[Path]:
-    candidates = list(config.paths.source_paths)
-    for list_file_path in config.paths.source_list_files:
-        candidates.extend(_iter_paths_from_list_file(list_file_path))
-    return candidates
-
-
-def _is_within(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
-
-
-def _discover_from_path(path: Path, excluded_roots: tuple[Path, ...]) -> list[Path]:
-    if path.is_dir():
-        return [
-            candidate.resolve()
-            for candidate in sorted(path.rglob("*"), key=lambda candidate: _ordering_key(candidate.resolve()))
-            if candidate.is_file()
-            and candidate.suffix.lower() in _SUPPORTED_EXTENSIONS
-            and not any(_is_within(candidate.resolve(), root) for root in excluded_roots)
-        ]
-
-    if not path.exists():
-        raise FileNotFoundError(f"Input path does not exist: {path}")
-
-    if path.is_file() and path.suffix.lower() in _SUPPORTED_EXTENSIONS:
-        return [path.resolve()]
-
-    return []
+def _is_supported_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in _SUPPORTED_EXTENSIONS
 
 
 def discover_supported_files(config: AppConfig) -> tuple[Path, ...]:
-    discovered: set[Path] = set()
-    excluded_roots = tuple(
-        sorted(
-            {
-                config.paths.im_temp_dir.resolve(),
-                config.paths.md_temp_dir.resolve(),
-                config.paths.output_dir.resolve(),
-                config.paths.log_file.parent.resolve(),
-            },
-            key=lambda path: path.as_posix().lower(),
-        )
-    )
-    for candidate in _collect_candidate_paths(config):
-        discovered.update(_discover_from_path(candidate, excluded_roots))
+    discovered: list[Path] = []
+    entries = sorted(config.paths.source_dir.iterdir(), key=lambda candidate: _ordering_key(candidate.resolve()))
+    for entry in entries:
+        resolved = entry.resolve()
+        if _is_supported_file(resolved):
+            _print_discovery_status(resolved, status="consumed")
+            discovered.append(resolved)
+            continue
 
-    ordered = sorted(discovered, key=_ordering_key)
-    return tuple(ordered)
+        if entry.is_dir():
+            _print_discovery_status(resolved, status="skipped", reason="not_a_file")
+            continue
+
+        _print_discovery_status(resolved, status="skipped", reason="unsupported_extension")
+
+    return tuple(discovered)
 
 
 def _source_type_for_file(path: Path) -> SourceType:
