@@ -1,0 +1,11 @@
+You are an expert document reconstruction engineer. Review the end of Page A and the start of Page B along with their summaries. Rate how naturally, grammatically, or contextually Page B continues Page A on a scale from 0 to 10.
+
+Scoring Rules:
+10 = Perfect grammatical fit.
+7 = Paragraph split or figure/table insertion continuity.
+5 = Minimum continuity.
+4 = Similar content but likely different document.
+3 = Major topic pivot or disjointed vocabulary.
+0 = Totally unrelated pages.
+
+Output raw JSON matching this schema exactly: {"reason": "string", "bridge_score": integer}

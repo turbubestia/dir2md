@@ -2,58 +2,53 @@ from __future__ import annotations
 
 import argparse
 
-from .config import build_config_from_args
+from .config import ConfigValidationError, build_config_from_args
 from .foundation import run_foundation_bootstrap
 
-
-def _build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="md-gen",
         description="Foundation CLI for markdown generation pipeline setup.",
     )
+
+    parser.add_argument("--source", required=True, help="Source directory containing top-level input files.")
+    parser.add_argument("--output", required=True, help="Output directory root for generated artifacts.")
     parser.add_argument(
-        "--source",
-        action="append",
-        default=[],
-        help="Source path. Repeat for multiple values.",
+        "--summary-prompt",
+        default=None,
+        help="Optional path to a summary system prompt file.",
     )
-    parser.add_argument(
-        "--source-list-file",
-        action="append",
-        default=[],
-        help="Text file with one source path per line.",
-    )
-    parser.add_argument("--output-dir", default=None)
-    parser.add_argument("--im-temp-dir", default=None)
-    parser.add_argument("--md-temp-dir", default=None)
-    parser.add_argument("--log-file", default=None)
-    parser.add_argument(
-        "--ocr-model-endpoint-url",
-        "--model-endpoint-url",
-        dest="ocr_model_endpoint_url",
-        default="http://127.0.0.1:8080/v1/chat/completions",
-    )
-    parser.add_argument("--ocr-model-name", "--model-name", dest="ocr_model_name", default="lightonocr-2")
+
+    parser.add_argument("--ocr-model-endpoint-url", default="http://127.0.0.1:8080/v1/chat/completions")
+    parser.add_argument("--ocr-model-name", default="lightonocr-2")
     parser.add_argument("--ocr-request-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--ocr-request-max-retries", type=int, default=2)
-    parser.add_argument(
-        "--summary-model-endpoint-url",
-        default="http://localhost:8081/v1/chat/completions",
-    )
-    parser.add_argument("--summary-model-name", default="qwen3-1.7b")
-    parser.add_argument("--summary-request-timeout-seconds", type=float, default=120.0)
-    parser.add_argument("--summary-request-max-retries", type=int, default=2)
+
+    parser.add_argument("--language-model-endpoint-url", default="http://localhost:8081/v1/chat/completions")
+    parser.add_argument("--language-model-name", default="qwen3-1.7b")
+    parser.add_argument("--language-request-timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--language-request-max-retries", type=int, default=2)
+    
     parser.add_argument("--max-longest-edge-px", type=int, default=1540)
     parser.add_argument("--token-threshold", type=int, default=16000)
-    parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=True)
+
+    parser.add_argument("--dry-run", action="store_true", default=False)
     parser.add_argument("--overwrite", action="store_true", default=False)
     return parser
 
 
 def main() -> int:
-    parser = _build_parser()
-    args = parser.parse_args()
-    config = build_config_from_args(args)
+    parser = build_parser()
+    try:
+        args = parser.parse_args()
+        config = build_config_from_args(args)
+    except ConfigValidationError as exc:
+        print(f"ERROR code={exc.error_code} message={exc}")
+        return 2
+    except Exception as exc:
+        print(f"ERROR code=cli_argument_error message={type(exc).__name__}: {exc}")
+        return 2
+
     return run_foundation_bootstrap(config)
 
 

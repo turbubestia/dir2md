@@ -9,7 +9,7 @@ from PIL import Image
 
 from common.llama_gateway import LlamaLanguageGateway, TextRequest
 
-from .io import validate_merge_batch_payload
+from .io import derive_image_dir, derive_markdown_dir, derive_plan_file, validate_merge_batch_payload
 
 
 _LETTER_RATIO = 8.5 / 11.0
@@ -18,6 +18,12 @@ _DPI = 300
 _LETTER_SIZE = (int(8.5 * _DPI), int(11 * _DPI))
 _LEGAL_SIZE = (int(8.5 * _DPI), int(14 * _DPI))
 _FILENAME_RE = re.compile(r"[^a-z0-9]+")
+
+
+class ApplyError(RuntimeError):
+    def __init__(self, error_code: str, message: str):
+        super().__init__(message)
+        self.error_code = error_code
 
 
 def _sanitize_component(value: str) -> str:
@@ -138,43 +144,42 @@ def _propose_document_stem(
 
 
 def apply_merge_plan(
-    merge_batch_file: Path,
-    output_dir: Path,
-    md_temp_dir: Path | None,
-    im_temp_dir: Path | None = None,
+    source_root: Path,
     naming_endpoint_url: str | None = "http://localhost:8081/v1/chat/completions",
     naming_model_name: str | None = "qwen3-1.7b",
     naming_timeout_seconds: float = 30.0,
     naming_max_retries: int = 0,
     overwrite: bool = False,
 ) -> int:
-    payload = json.loads(merge_batch_file.read_text(encoding="utf-8"))
+    source_root = source_root.expanduser().resolve()
+    plan_file = derive_plan_file(source_root)
+    markdown_dir = derive_markdown_dir(source_root)
+    image_dir = derive_image_dir(source_root)
+
+    print(f"APPLY source={source_root}")
+    print(f"APPLY plan_file={plan_file}")
+    print(f"APPLY markdown_dir={markdown_dir}")
+    print(f"APPLY image_dir={image_dir}")
+
+    if not plan_file.exists():
+        raise ApplyError("plan_file_not_found", f"Merge plan file not found: {plan_file}")
+    if not markdown_dir.exists() or not markdown_dir.is_dir():
+        raise ApplyError("markdown_temp_missing", f"Markdown temp directory not found: {markdown_dir}")
+    if not image_dir.exists() or not image_dir.is_dir():
+        raise ApplyError("image_temp_missing", f"Image temp directory not found: {image_dir}")
+
+    payload = json.loads(plan_file.read_text(encoding="utf-8"))
     validate_merge_batch_payload(payload)
     documents = payload.get("documents")
     if not isinstance(documents, list):
-        raise ValueError("Merge batch is missing documents array")
+        raise ApplyError("invalid_merge_batch", "Merge batch is missing documents array")
 
-    resolved_md_temp_dir = md_temp_dir
-    if resolved_md_temp_dir is None:
-        batch_md_temp_dir = payload.get("md_temp_dir")
-        if not isinstance(batch_md_temp_dir, str):
-            raise ValueError("md_temp_dir must be provided via --md-temp-dir or batch file metadata")
-        resolved_md_temp_dir = Path(batch_md_temp_dir)
-
-    resolved_im_temp_dir = im_temp_dir
-    if resolved_im_temp_dir is None:
-        batch_im_temp_dir = payload.get("im_temp_dir")
-        if isinstance(batch_im_temp_dir, str):
-            resolved_im_temp_dir = Path(batch_im_temp_dir)
-        else:
-            resolved_im_temp_dir = resolved_md_temp_dir.parent / "im-temp"
-
+    output_dir = source_root
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for document in documents:
         if not isinstance(document, dict):
             continue
-        document_id = str(document.get("document_id", "document"))
         stem = _propose_document_stem(
             document=document,
             naming_endpoint_url=naming_endpoint_url,
@@ -199,7 +204,7 @@ def apply_merge_plan(
             markdown_file = fragment.get("markdown_file")
             if not isinstance(markdown_file, str):
                 continue
-            markdown_path = resolved_md_temp_dir / markdown_file
+            markdown_path = markdown_dir / markdown_file
             if not markdown_path.exists():
                 continue
             markdown_text = markdown_path.read_text(encoding="utf-8")
@@ -220,7 +225,7 @@ def apply_merge_plan(
             image_file = fragment.get("image_file")
             if not isinstance(image_file, str):
                 continue
-            image_path = resolved_im_temp_dir / image_file
+            image_path = image_dir / image_file
             if image_path.exists():
                 image_paths.append(image_path)
 

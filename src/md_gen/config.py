@@ -1,31 +1,46 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 
+class ConfigValidationError(ValueError):
+    def __init__(self, error_code: str, message: str):
+        super().__init__(message)
+        self.error_code = error_code
+
+
+DEFAULT_SUMMARY_PROMPT_FILE = Path(__file__).resolve().parents[2] / "prompts" / "md_gen_summary_system_prompt.txt"
+BUILTIN_SUMMARY_PROMPT = (
+    "You are an automated data-extraction parser. You process OCR text and output a concise summary "
+    "no longer than three lines.\n\n"
+    "CRITICAL INSTRUCTIONS:\n"
+    "- DO NOT use thinking tags (<think>...</think>).\n"
+    "- DO NOT output chain-of-thought reasoning, explanations, or introductory text.\n"
+    "- Return only plain text summary content.\n"
+    "- Avoid markdown formatting."
+)
+
+
 @dataclass(frozen=True)
 class PathSettings:
-    source_paths: tuple[Path, ...]
-    source_list_files: tuple[Path, ...]
+    source_dir: Path
     output_dir: Path
+    temp_dir: Path
     im_temp_dir: Path
     md_temp_dir: Path
-    log_file: Path
+    metadata_temp_dir: Path
 
 
 @dataclass(frozen=True)
-class OcrModelSettings:
-    endpoint_url: str
-    model_name: str
-    request_timeout_seconds: float
-    request_max_retries: int
-
+class PromptSettings:
+    summary_prompt_override_path: Path | None
+    summary_prompt_default_path: Path
+    summary_prompt_builtin_text: str
 
 @dataclass(frozen=True)
-class SummaryModelSettings:
+class LlamaModelSettings:
     endpoint_url: str
     model_name: str
     request_timeout_seconds: float
@@ -47,87 +62,72 @@ class RuntimeSettings:
 @dataclass(frozen=True)
 class AppConfig:
     paths: PathSettings
-    ocr_model: OcrModelSettings
-    summary_model: SummaryModelSettings
+    prompts: PromptSettings
+    ocr_model: LlamaModelSettings
+    language_model: LlamaModelSettings
     image: ImageSettings
     runtime: RuntimeSettings
 
 
-def _normalize_paths(raw_paths: list[str] | None) -> tuple[Path, ...]:
-    if not raw_paths:
-        return tuple()
-    normalized = sorted({Path(path).expanduser().resolve() for path in raw_paths})
-    return tuple(normalized)
+def _resolve_required_directory(raw_value: str) -> Path:
+    resolved = Path(raw_value).expanduser().resolve()
+    if not resolved.exists() or not resolved.is_dir():
+        raise ConfigValidationError(
+            "invalid_source_directory",
+            f"--source must be an existing directory: {resolved}",
+        )
+    return resolved
 
 
-def _source_base_path(source_path: Path) -> Path:
-    if source_path.exists():
-        return source_path if source_path.is_dir() else source_path.parent
-    if source_path.suffix:
-        return source_path.parent
-    return source_path
+def _resolve_output_directory(raw_value: str) -> Path:
+    resolved = Path(raw_value).expanduser().resolve()
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ConfigValidationError(
+            "output_directory_create_failed",
+            f"Failed to create --output directory: {resolved}",
+        ) from exc
+    return resolved
 
 
-def _resolve_default_base_dir(source_paths: tuple[Path, ...], source_list_files: tuple[Path, ...]) -> Path:
-    if source_paths:
-        source_bases = [_source_base_path(source_path) for source_path in source_paths]
-        if len(source_bases) == 1:
-            return source_bases[0]
-        common = os.path.commonpath([base.as_posix() for base in source_bases])
-        return Path(common)
-
-    if source_list_files:
-        list_bases = [list_file.parent for list_file in source_list_files]
-        if len(list_bases) == 1:
-            return list_bases[0]
-        common = os.path.commonpath([base.as_posix() for base in list_bases])
-        return Path(common)
-
-    return Path.cwd().resolve()
-
-
-def _resolve_optional_path(raw_value: str | None, fallback: Path) -> Path:
-    if raw_value is None:
-        return fallback.resolve()
+def _resolve_optional_file(raw_value: str | None) -> Path | None:
+    if not raw_value:
+        return None
     return Path(raw_value).expanduser().resolve()
 
 
-def _arg_with_fallback(args: SimpleNamespace, preferred: str, fallback: str) -> str:
-    preferred_value = getattr(args, preferred, None)
-    if preferred_value is not None:
-        return str(preferred_value)
-    fallback_value = getattr(args, fallback, None)
-    if fallback_value is not None:
-        return str(fallback_value)
-    raise AttributeError(f"Missing required argument values: {preferred} and {fallback}")
-
-
 def build_config_from_args(args: SimpleNamespace) -> AppConfig:
-    source_paths = _normalize_paths(args.source)
-    source_list_files = _normalize_paths(args.source_list_file)
-    base_dir = _resolve_default_base_dir(source_paths=source_paths, source_list_files=source_list_files)
+    source_dir = _resolve_required_directory(args.source)
+    output_dir = _resolve_output_directory(args.output)
+    temp_dir = output_dir / "temp"
+    summary_prompt_override_path = _resolve_optional_file(getattr(args, "summary_prompt", None))
+
     return AppConfig(
         paths=PathSettings(
-            source_paths=source_paths,
-            source_list_files=source_list_files,
-            output_dir=_resolve_optional_path(args.output_dir, base_dir / "output"),
-            im_temp_dir=_resolve_optional_path(args.im_temp_dir, base_dir / "im-temp"),
-            md_temp_dir=_resolve_optional_path(args.md_temp_dir, base_dir / "md-temp"),
-            log_file=_resolve_optional_path(args.log_file, base_dir / "logs" / "md-gen.log"),
+            source_dir=source_dir,
+            output_dir=output_dir,
+            temp_dir=temp_dir,
+            im_temp_dir=temp_dir / "images",
+            md_temp_dir=temp_dir / "markdown",
+            metadata_temp_dir=temp_dir / "metadata",
         ),
-        ocr_model=OcrModelSettings(
-            endpoint_url=_arg_with_fallback(args, "ocr_model_endpoint_url", "model_endpoint_url"),
-            model_name=_arg_with_fallback(args, "ocr_model_name", "model_name"),
-            request_timeout_seconds=float(
-                _arg_with_fallback(args, "ocr_request_timeout_seconds", "request_timeout_seconds")
-            ),
-            request_max_retries=int(_arg_with_fallback(args, "ocr_request_max_retries", "request_max_retries")),
+        prompts=PromptSettings(
+            summary_prompt_override_path=summary_prompt_override_path,
+            summary_prompt_default_path=DEFAULT_SUMMARY_PROMPT_FILE,
+            summary_prompt_builtin_text=BUILTIN_SUMMARY_PROMPT,
         ),
-        summary_model=SummaryModelSettings(
-            endpoint_url=getattr(args, "summary_model_endpoint_url", "http://localhost:8081/v1/chat/completions"),
-            model_name=getattr(args, "summary_model_name", "qwen3-1.7b"),
-            request_timeout_seconds=getattr(args, "summary_request_timeout_seconds", 120.0),
-            request_max_retries=getattr(args, "summary_request_max_retries", 2),
+        ocr_model=LlamaModelSettings(
+            endpoint_url=args.ocr_model_endpoint_url,
+            model_name=args.ocr_model_name,
+            request_timeout_seconds=args.ocr_request_timeout_seconds,
+            request_max_retries=args.ocr_request_max_retries,
+        ),
+        language_model=LlamaModelSettings(
+            endpoint_url=args.language_model_endpoint_url,
+            model_name=args.language_model_name,
+            request_timeout_seconds=args.language_request_timeout_seconds,
+            request_max_retries=args.language_request_max_retries,
         ),
         image=ImageSettings(
             max_longest_edge_px=args.max_longest_edge_px,

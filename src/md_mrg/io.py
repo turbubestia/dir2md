@@ -7,6 +7,9 @@ from typing import Any
 from .models import FragmentRecord
 
 
+DETERMINISTIC_PLAN_FILE_NAME = "merge-plan.json"
+
+
 def _require_dict(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be an object")
@@ -62,6 +65,26 @@ def load_metadata_documents(md_temp_dir: Path) -> tuple[dict[str, Any], ...]:
             continue
         raise ValueError(f"Unsupported metadata payload in {json_file.name}")
     return tuple(documents)
+
+
+def derive_temp_root(source_root: Path) -> Path:
+    return source_root / "temp"
+
+
+def derive_metadata_dir(source_root: Path) -> Path:
+    return derive_temp_root(source_root) / "metadata"
+
+
+def derive_markdown_dir(source_root: Path) -> Path:
+    return derive_temp_root(source_root) / "markdown"
+
+
+def derive_image_dir(source_root: Path) -> Path:
+    return derive_temp_root(source_root) / "images"
+
+
+def derive_plan_file(source_root: Path) -> Path:
+    return source_root / DETERMINISTIC_PLAN_FILE_NAME
 
 
 def split_documents_by_sequence(
