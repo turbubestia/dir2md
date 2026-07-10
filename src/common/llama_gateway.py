@@ -324,6 +324,7 @@ class BridgeScoreRequest:
     page_a_summary: str
     page_b_start: str
     page_b_summary: str
+    system_prompt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -334,7 +335,7 @@ class BridgeScoreResponse:
     raw_response: dict[str, Any]
 
 def build_bridge_score_request_payload(model_name: str, request: BridgeScoreRequest) -> dict[str, Any]:
-    system_prompt = (
+    default_system_prompt = (
         "You are an expert document reconstruction engineer. Review the end of Page A and the start of Page B "
         "along with their summaries. Rate how naturally, grammatically, or contextually Page B continues Page A "
         "on a scale from 0 to 10.\n\n"
@@ -347,6 +348,7 @@ def build_bridge_score_request_payload(model_name: str, request: BridgeScoreRequ
         "0 = Totally unrelated pages.\n\n"
         "Output raw JSON matching this schema exactly: {\"reason\": \"string\", \"bridge_score\": integer}"
     )
+    system_prompt = request.system_prompt.strip() if isinstance(request.system_prompt, str) and request.system_prompt.strip() else default_system_prompt
     user_prompt = (
         f"Page A End: \"{request.page_a_end}\"\n"
         f"Page A Summary: \"{request.page_a_summary}\"\n"

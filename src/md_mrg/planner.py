@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .io import flatten_loose_fragments, load_metadata_documents, split_documents_by_sequence, write_plan_file
 from .models import CandidateEdge, EdgeScore, FragmentRecord, PlanConfig
-from .scorers import HeuristicEdgeScorer, LlmEdgeScorer
+from .scorers import LlmEdgeScorer
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,6 @@ def _resolve_edges(scores: tuple[EdgeScore, ...]) -> tuple[EdgeScore, ...]:
     eligible.sort(
         key=lambda score: (
             -score.score_0_10,
-            -(score.heuristic_score if score.heuristic_score is not None else -1.0),
             score.from_fragment_id,
             score.to_fragment_id,
         )
@@ -143,7 +142,6 @@ def _build_documents_from_edges(
             }
         )
 
-    # Include any unvisited nodes as standalone documents.
     for fragment in fragments:
         if fragment.fragment_id in visited:
             continue
@@ -180,25 +178,47 @@ def _build_documents_from_edges(
     return tuple(documents)
 
 
-def _score_candidates(config: PlanConfig, candidates: tuple[CandidateEdge, ...]) -> tuple[EdgeScore, ...]:
-    if config.edge_scorer == "heuristic":
-        return HeuristicEdgeScorer().score_edges(candidates)
+def _load_prompt_file(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    return text
 
-    return LlmEdgeScorer(
-        endpoint_url=config.llm_endpoint_url,
-        model_name=config.llm_model_name,
-        timeout_seconds=config.llm_timeout_seconds,
-        max_retries=config.llm_max_retries,
-    ).score_edges(candidates)
+
+def load_score_system_prompt(config: PlanConfig) -> str:
+    if config.score_prompt_override_path is not None:
+        override_text = _load_prompt_file(config.score_prompt_override_path)
+        if override_text is not None:
+            print(f"PROMPT status=loaded source=override path={config.score_prompt_override_path}")
+            return override_text
+        print(f"PROMPT status=fallback source=override_unreadable path={config.score_prompt_override_path}")
+
+    default_text = _load_prompt_file(config.score_prompt_default_path)
+    if default_text is not None:
+        print(f"PROMPT status=loaded source=default path={config.score_prompt_default_path}")
+        return default_text
+
+    print("PROMPT status=fallback source=builtin")
+    return config.score_prompt_builtin_text
 
 
 def build_merge_plan(config: PlanConfig) -> PlanResult:
-    metadata_documents = load_metadata_documents(config.md_temp_dir)
+    metadata_documents = load_metadata_documents(config.metadata_dir)
     verified_documents, loose_documents = split_documents_by_sequence(metadata_documents)
     loose_fragments = flatten_loose_fragments(loose_documents)
 
     candidate_edges = _build_candidate_edges(loose_fragments, config.rolling_window)
-    scored_edges = _score_candidates(config, candidate_edges)
+    score_prompt = load_score_system_prompt(config)
+    scored_edges = LlmEdgeScorer(
+        endpoint_url=config.llm_endpoint_url,
+        model_name=config.llm_model_name,
+        timeout_seconds=config.llm_timeout_seconds,
+        max_retries=config.llm_max_retries,
+        system_prompt=score_prompt,
+    ).score_edges(candidate_edges)
     accepted_edges = _resolve_edges(scored_edges)
 
     planned_documents = [
@@ -215,8 +235,10 @@ def build_merge_plan(config: PlanConfig) -> PlanResult:
         "schema_version": "2.0",
         "batch_id": str(uuid.uuid4()),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "md_temp_dir": str(config.md_temp_dir),
-        "im_temp_dir": str(config.md_temp_dir.parent / "im-temp"),
+        "source_root": str(config.source_root),
+        "metadata_dir": str(config.metadata_dir),
+        "markdown_dir": str(config.markdown_dir),
+        "image_dir": str(config.image_dir),
         "scorer_mode": config.edge_scorer,
         "documents": planned_documents,
         "edge_scores": [
@@ -234,6 +256,5 @@ def build_merge_plan(config: PlanConfig) -> PlanResult:
         ],
     }
 
-    output_path = config.mg_temp_dir / "merge-plan.json"
-    output_path = write_plan_file(output_path=output_path, payload=payload, overwrite=config.overwrite)
+    output_path = write_plan_file(output_path=config.plan_file, payload=payload, overwrite=config.overwrite)
     return PlanResult(output_path=output_path, document_count=len(planned_documents))
