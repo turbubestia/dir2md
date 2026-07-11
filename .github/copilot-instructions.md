@@ -34,4 +34,7 @@ Keep responsibilities separated. Do not duplicate OCR or normalization logic bet
 - Prefer fast unit tests for token sizing, path planning, and grouping heuristics.
 - Add integration tests for end-to-end CLI flows with fixture PDFs/images.
 - Mock model responses for deterministic tests.
+- pytest is setup and ready to use for running both unit and integration tests with code coverage support.
+- Ensure tests are run within the project environment to maintain consistency with local development.
+- Use `pytest` command with appropriate flags to check code coverage and test results.
 
