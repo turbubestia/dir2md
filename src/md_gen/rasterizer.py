@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha1
 from pathlib import Path
 from typing import Literal
 
@@ -46,19 +45,8 @@ def _classify_pdfium_error_message(message: str) -> PdfRasterizationErrorCode:
     return "unreadable_pdf"
 
 
-def _sanitize_stem(path: Path) -> str:
-    cleaned = []
-    for char in path.stem.lower():
-        if char.isalnum() or char in {"-", "_"}:
-            cleaned.append(char)
-        else:
-            cleaned.append("-")
-    return "".join(cleaned).strip("-") or "document"
-
-
 def _build_output_image_path(source_pdf_path: Path, page_number: int, output_dir: Path) -> Path:
-    source_hash = sha1(source_pdf_path.as_posix().encode("utf-8")).hexdigest()[:10]
-    output_name = f"{_sanitize_stem(source_pdf_path)}-{source_hash}-p{page_number:04d}.png"
+    output_name = f"{source_pdf_path.stem}-p{page_number:04d}.png"
     return output_dir / output_name
 
 
@@ -67,6 +55,7 @@ def rasterize_pdf_work_item(
     output_dir: Path,
     render_scale: float = 2.0,
 ) -> tuple[PdfPageRaster, ...]:
+    
     source_pdf_path = work_item.source_path
     if not source_pdf_path.exists():
         raise PdfRasterizationError(
@@ -76,6 +65,7 @@ def rasterize_pdf_work_item(
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
     try:
         document = pdfium.PdfDocument(source_pdf_path)
     except pdfium.PdfiumError as exc:
@@ -111,15 +101,15 @@ def rasterize_pdf_work_item(
 
             pages.append(
                 PdfPageRaster(
-                    source_pdf_path=source_pdf_path,
-                    source_order_index=work_item.order_index,
-                    source_ordering_key=work_item.ordering_key,
-                    page_index=page_index,
-                    page_number=page_number,
-                    total_pages=total_pages,
-                    image_path=output_path,
-                    image_width=image_width,
-                    image_height=image_height,
+                    source_pdf_path = source_pdf_path,
+                    source_order_index = work_item.order_index,
+                    source_ordering_key = work_item.ordering_key,
+                    page_index = page_index,
+                    page_number = page_number,
+                    total_pages = total_pages,
+                    image_path = output_path,
+                    image_width = image_width,
+                    image_height = image_height,
                 )
             )
     finally:
@@ -133,9 +123,11 @@ def rasterize_pdf_work_items(
     output_dir: Path,
     render_scale: float = 2.0,
 ) -> tuple[PdfPageRaster, ...]:
+    
     all_pages: list[PdfPageRaster] = []
     for work_item in work_items:
         if work_item.source_type != "pdf":
             continue
         all_pages.extend(rasterize_pdf_work_item(work_item, output_dir=output_dir, render_scale=render_scale))
+
     return tuple(all_pages)
