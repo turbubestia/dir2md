@@ -6,13 +6,12 @@ from typing import Literal
 
 from .config import AppConfig
 
-SourceType = Literal["pdf", "image"]
-
 _PDF_EXTENSIONS = {".pdf"}
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpge"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 _SUPPORTED_EXTENSIONS = _PDF_EXTENSIONS | _IMAGE_EXTENSIONS
 _DISCOVERY_PREFIX = "DISCOVERY"
 
+SourceType = Literal["pdf", "image"]
 
 @dataclass(frozen=True)
 class WorkItem:
@@ -22,8 +21,12 @@ class WorkItem:
     ordering_key: str
 
 
+# we will only look for files in the top-level of the source directory, 
+# and we will not recurse into subdirectories, therefore files must have 
+# unique names in the source directory. We will use the file name as the 
+# ordering key for sorting work items.
 def _ordering_key(path: Path) -> str:
-    return path.as_posix().lower()
+    return path.name().lower()
 
 
 def _print_discovery_status(path: Path, *, status: str, reason: str = "") -> None:
@@ -36,10 +39,14 @@ def _is_supported_file(path: Path) -> bool:
 
 
 def discover_supported_files(config: AppConfig) -> tuple[Path, ...]:
+    
     discovered: list[Path] = []
+
     entries = sorted(config.paths.source_dir.iterdir(), key=lambda candidate: _ordering_key(candidate.resolve()))
+
     for entry in entries:
         resolved = entry.resolve()
+
         if _is_supported_file(resolved):
             _print_discovery_status(resolved, status="consumed")
             discovered.append(resolved)
@@ -61,7 +68,7 @@ def _source_type_for_file(path: Path) -> SourceType:
     return "image"
 
 
-def normalize_work_items(files: tuple[Path, ...]) -> tuple[WorkItem, ...]:
+def build_work_items(files: tuple[Path, ...]) -> tuple[WorkItem, ...]:
     return tuple(
         WorkItem(
             source_path=path,
@@ -72,7 +79,11 @@ def normalize_work_items(files: tuple[Path, ...]) -> tuple[WorkItem, ...]:
         for index, path in enumerate(files)
     )
 
-
+# This will create a list of work items from the discovered files in the source directory,
+# and return them as a tuple. The work items will be sorted by the ordering key, which is 
+# the file name in lowercase. The order index will be assigned based on the order of the
+# files in the source directory after sorting.
 def build_work_items(config: AppConfig) -> tuple[WorkItem, ...]:
     discovered_files = discover_supported_files(config)
-    return normalize_work_items(discovered_files)
+    work_items = build_work_items(discovered_files)
+    return work_items
