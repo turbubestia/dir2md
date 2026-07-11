@@ -26,7 +26,7 @@ class WorkItem:
 # unique names in the source directory. We will use the file name as the 
 # ordering key for sorting work items.
 def _ordering_key(path: Path) -> str:
-    return path.name().lower()
+    return path.name.lower()
 
 
 def _print_discovery_status(path: Path, *, status: str, reason: str = "") -> None:
@@ -68,7 +68,7 @@ def _source_type_for_file(path: Path) -> SourceType:
     return "image"
 
 
-def build_work_items(files: tuple[Path, ...]) -> tuple[WorkItem, ...]:
+def normalize_work_items(files: tuple[Path, ...]) -> tuple[WorkItem, ...]:
     return tuple(
         WorkItem(
             source_path=path,
@@ -85,5 +85,5 @@ def build_work_items(files: tuple[Path, ...]) -> tuple[WorkItem, ...]:
 # files in the source directory after sorting.
 def build_work_items(config: AppConfig) -> tuple[WorkItem, ...]:
     discovered_files = discover_supported_files(config)
-    work_items = build_work_items(discovered_files)
+    work_items = normalize_work_items(discovered_files)
     return work_items
