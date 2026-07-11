@@ -7,7 +7,7 @@ from typing import Any
 
 from PIL import Image
 
-from common.llama_gateway import LlamaLanguageGateway, TextRequest
+from common.gateway import LlamaLanguageGateway, TextRequest
 
 from .io import derive_image_dir, derive_markdown_dir, derive_plan_file, validate_merge_batch_payload
 

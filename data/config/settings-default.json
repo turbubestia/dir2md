@@ -1,0 +1,16 @@
+{
+    "app_name": "dir2md",
+    "version": "0.1.0",
+    "ocr_model": {
+        "endpoint": "http://127.0.0.1:8080/v1",
+        "model": "lightonocr-2"
+    },
+    "language_model": {
+        "endpoint": "http://127.0.0.1:8081/v1",
+        "model": "qwen3-1.7b"
+    },
+    "request_timeout_seconds": 120,
+    "request_max_retries": 3,
+    "max-longest-edge-px": 1540,
+    "token-threshold": 4096 
+}

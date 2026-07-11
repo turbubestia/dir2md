@@ -1,6 +1,6 @@
 """md-gen foundation package."""
 
-from common.llama_gateway import GatewayError, LlamaOcrGateway, OcrRequest, OcrResponse, build_vision_request_payload
+from common.gateway import GatewayError, LlamaOcrGateway, OcrRequest, OcrResponse, build_vision_request_payload
 
 from .cli import build_parser
 from .config import AppConfig, build_config_from_args

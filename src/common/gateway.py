@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import base64
-import json
 import re
+import json
+import httpx
+import base64
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
-
-import httpx
 
 # error data structures -------------------------------------------------------
 
@@ -294,8 +293,7 @@ def build_text_summary_request_payload(model_name: str, request: SummaryRequest)
 
 def sanitize_summary_text(summary_text: str) -> str:
     normalized = summary_text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
-    cleaned = _SUMMARY_ALLOWED_CHARS.sub(" ", normalized)
-    return " ".join(cleaned.split())
+    return " ".join(normalized.split())
 
 class LlamaSummaryGateway(LlamaLanguageGateway):
 

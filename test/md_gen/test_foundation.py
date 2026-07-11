@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from common.llama_gateway import OcrResponse
+from common.gateway import OcrResponse
 from md_gen.config import BUILTIN_SUMMARY_PROMPT, build_config_from_args
 from md_gen.foundation import SummaryAttempt, load_summary_system_prompt, run_foundation_bootstrap
 

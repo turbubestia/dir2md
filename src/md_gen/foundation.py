@@ -7,7 +7,7 @@ from typing import Callable, TypeVar
 from .config import AppConfig, ConfigValidationError
 from .discovery import WorkItem, build_work_items
 
-from common.llama_gateway import (
+from common.gateway import (
     GatewayError,
     OcrResponse,
     LlamaOcrGateway,

@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 from PIL import Image
 
-from common.llama_gateway import (
+from common.gateway import (
     BridgeScoreRequest,
     GatewayError,
     LlamaBridgeScoreGateway,

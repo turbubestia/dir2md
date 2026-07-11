@@ -1,13 +1,13 @@
 """Shared connectors and utilities across modules."""
 
 # Common errors and exceptions
-from .llama_gateway import (
+from .gateway import (
     GatewayError, 
     GatewayErrorCode
 )
 
 # OCR Gateway
-from .llama_gateway import (
+from .gateway import (
     OcrRequest,
     OcrResponse,
     LlamaOcrGateway,
@@ -16,7 +16,7 @@ from .llama_gateway import (
 )
 
 # Language Gateway
-from .llama_gateway import (
+from .gateway import (
     TextRequest,
     TextResponse,
     LlamaLanguageGateway,
@@ -24,7 +24,7 @@ from .llama_gateway import (
 )
 
 # Summary Gateway
-from .llama_gateway import (
+from .gateway import (
     SummaryRequest,
     SummaryResponse,
     build_text_summary_request_payload,
@@ -32,7 +32,7 @@ from .llama_gateway import (
 )
 
 # Bridge Score Gateway
-from .llama_gateway import (
+from .gateway import (
     BridgeScoreRequest,
     BridgeScoreResponse,
     build_bridge_score_request_payload,

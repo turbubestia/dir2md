@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from common.llama_gateway import GatewayError
+from common.gateway import GatewayError
 from md_mrg import apply as apply_mod
 from md_mrg import io as io_mod
 from md_mrg import planner as planner_mod

@@ -16,6 +16,7 @@ md-mrg = "md_mrg.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
 ]
 
 [build-system]
@@ -24,6 +25,8 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--cov=src --cov-report=term-missing"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/common", "src/md_gen", "src/md_mrg"]

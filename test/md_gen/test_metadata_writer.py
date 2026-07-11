@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from common.llama_gateway import OcrResponse
+from common.gateway import OcrResponse
 from md_gen.markdown_writer import PersistedMarkdownRecord
 from md_gen.metadata_writer import persist_document_metadata
 

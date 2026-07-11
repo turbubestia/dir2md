@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
 
-from common.llama_gateway import OcrResponse
+from common.gateway import OcrResponse
 from .rasterizer import PdfPageRaster
 from .resizer import ImageResizeResult
 from .token_budget import ImageTokenBudgetReport

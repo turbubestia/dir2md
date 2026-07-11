@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
 
-from common.llama_gateway import OcrResponse
+from common.gateway import OcrResponse
 from .markdown_writer import PersistedMarkdownRecord
 
 _ALLOWED_TEXT_CHARS = re.compile(r"[^a-zA-Z0-9 .\-]+")
@@ -32,7 +32,7 @@ def _sanitize_stem(path: Path) -> str:
 
 
 def _normalize_plain_text(value: str) -> str:
-    cleaned = _ALLOWED_TEXT_CHARS.sub(" ", value.replace("\r\n", "\n").replace("\r", "\n"))
+    cleaned = value.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
     return " ".join(cleaned.split())
 
 
