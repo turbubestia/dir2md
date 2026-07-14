@@ -176,7 +176,7 @@ class OcrResponse:
 
 def _mime_type_for_path(path: Path) -> str:
     suffix = path.suffix.lower()
-    if suffix in {".jpg", ".jpeg", ".jpge"}:
+    if suffix in {".jpg", ".jpeg"}:
         return "image/jpeg"
     if suffix == ".webp":
         return "image/webp"

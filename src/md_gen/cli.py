@@ -20,18 +20,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to a summary system prompt file.",
     )
 
-    parser.add_argument("--ocr-model-endpoint", default="http://127.0.0.1:8080/v1/chat/completions")
-    parser.add_argument("--ocr-model-name", default="lightonocr-2")
-    parser.add_argument("--ocr-timeout-seconds", type=float, default=120.0)
-    parser.add_argument("--ocr-max-retries", type=int, default=2)
+    parser.add_argument("--ocr-model-endpoint", default=None)
+    parser.add_argument("--ocr-model-name", default=None)
+    parser.add_argument("--ocr-timeout-seconds", type=float, default=None)
+    parser.add_argument("--ocr-max-retries", type=int, default=None)
 
-    parser.add_argument("--language-model-endpoint", default="http://localhost:8081/v1/chat/completions")
-    parser.add_argument("--language-model-name", default="qwen3-1.7b")
-    parser.add_argument("--language-timeout-seconds", type=float, default=120.0)
-    parser.add_argument("--language-max-retries", type=int, default=2)
-    
-    parser.add_argument("--max-longest-edge-px", type=int, default=1540)
-    parser.add_argument("--token-threshold", type=int, default=16000)
+    parser.add_argument("--language-model-endpoint", default=None)
+    parser.add_argument("--language-model-name", default=None)
+    parser.add_argument("--language-timeout-seconds", type=float, default=None)
+    parser.add_argument("--language-max-retries", type=int, default=None)
+
+    parser.add_argument("--max-longest-edge-px", type=int, default=None)
+    parser.add_argument("--token-threshold", type=int, default=None)
 
     parser.add_argument("--dry-run", action="store_true", default=False)
     parser.add_argument("--overwrite", action="store_true", default=False)

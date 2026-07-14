@@ -51,5 +51,3 @@ def run_foundation_bootstrap(config: AppConfig) -> int:
         return 1
 
 
-def run_phase_one_bootstrap(config: AppConfig) -> int:
-    return run_foundation_bootstrap(config)
