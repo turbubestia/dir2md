@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -13,20 +14,26 @@ _DISCOVERY_PREFIX = "DISCOVERY"
 
 SourceType = Literal["pdf", "image"]
 
+_SPLIT_RE = re.compile(r"(\d+)")
+
+
 @dataclass(frozen=True)
 class FileItem:
     source_path: Path
     source_type: SourceType
     order_index: int
-    ordering_key: str
+    ordering_key: tuple[str | int, ...]
 
 
-# we will only look for files in the top-level of the source directory, 
-# and we will not recurse into subdirectories, therefore files must have 
-# unique names in the source directory. We will use the file name as the 
-# ordering key for sorting work items.
-def _ordering_key(path: Path) -> str:
-    return path.name.lower()
+# we will only look for files in the top-level of the source directory,
+# and we will not recurse into subdirectories, therefore files must have
+# unique names in the source directory. We will use the file name as the
+# ordering key for sorting work items, comparing numeric runs numerically.
+def _ordering_key(path: Path) -> tuple[str | int, ...]:
+    return tuple(
+        int(segment) if segment.isdigit() else segment.lower()
+        for segment in _SPLIT_RE.split(path.name)
+    )
 
 
 def _print_discovery_status(path: Path, *, status: str, reason: str = "") -> None:

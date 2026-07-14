@@ -4,23 +4,20 @@ from common.gateway import GatewayError, LlamaOcrGateway, TextRequest, LlamaLang
 
 from .cli import build_parser
 from .config import AppConfig, build_config_from_args
-from .rasterizer import PdfPageRaster, PdfRasterizationError
-from .resizer import ImageResizeResult
-
-# from .markdown_writer import PersistedMarkdownRecord
+from .discovery import FileItem
+from .rasterizer import RasterizationError
 
 __all__ = [
     # general configuration
-	"AppConfig",
+    "AppConfig",
     # gateway related
-	"GatewayError",
-	"LlamaOcrGateway",
+    "GatewayError",
+    "LlamaOcrGateway",
     "TextRequest",
-	"LlamaLanguageGateway",
-    #  rasterization related
-	"PdfPageRaster",
-	"PdfRasterizationError",
-	"ImageResizeResult",
-	"build_config_from_args",
-	"build_parser",
+    "LlamaLanguageGateway",
+    # discovery and rasterization
+    "FileItem",
+    "RasterizationError",
+    "build_config_from_args",
+    "build_parser",
 ]

@@ -34,6 +34,23 @@ def test_build_vision_request_payload_matches_openai_vision_shape(tmp_path: Path
         assert payload["messages"][0]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
+def test_build_vision_request_payload_from_image_matches_openai_vision_shape() -> None:
+    image = Image.new("RGB", (32, 32), color=(255, 255, 255))
+
+    with LlamaOcrGateway(
+        endpoint_url="http://127.0.0.1:8080/v1/chat/completions",
+        model_name="lightonocr-2",
+    ) as gateway:
+        messages = gateway.build_ocr_request_messages_from_image(image)
+        payload = gateway._build_payload(messages)
+        assert payload["model"] == "lightonocr-2"
+        assert payload["messages"][0]["role"] == "user"
+        assert payload["messages"][0]["content"][0]["type"] == "image_url"
+        assert payload["messages"][0]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
+
+    image.close()
+
+
 def test_gateway_retries_and_succeeds_after_transient_unavailable(tmp_path: Path) -> None:
     image_path = tmp_path / "sample.png"
     _make_image(image_path)

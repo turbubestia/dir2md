@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from email.mime import message
-from pyexpat.errors import messages
-
-import httpx
 import base64
-
+import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+
+import httpx
+from PIL import Image
 
 # error data structures -------------------------------------------------------
 
@@ -197,8 +196,17 @@ class LlamaOcrGateway(_BaseGateway):
         mime_type = _mime_type_for_path(image_path)
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         payload =  f"data:{mime_type};base64,{encoded}"
-        return [ 
+        return [
             { "role": "user", "content": [ { "type": "image_url", "image_url": { "url": payload }, },], }
+        ]
+
+    def build_ocr_request_messages_from_image(self, image: Image.Image) -> list[dict[str, Any]]:
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        payload = f"data:image/png;base64,{encoded}"
+        return [
+            {"role": "user", "content": [{"type": "image_url", "image_url": {"url": payload}}]}
         ]
 
     def send_ocr_request(self, image_path: Path) -> OcrResponse:
@@ -211,6 +219,18 @@ class LlamaOcrGateway(_BaseGateway):
             model_name = self._model_name,
             markdown_text = markdown_text,
             raw_response = response_json,
+        )
+
+    def send_ocr_request_from_image(self, image: Image.Image) -> OcrResponse:
+        messages = self.build_ocr_request_messages_from_image(image)
+        response = self._post_with_retry(messages)
+        response_json = response.json()
+        markdown_text = _extract_text_content(response_json)
+        return OcrResponse(
+            image_path=Path("-"),
+            model_name=self._model_name,
+            markdown_text=markdown_text,
+            raw_response=response_json,
         )
     
 

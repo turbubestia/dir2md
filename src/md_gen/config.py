@@ -16,7 +16,7 @@ class ConfigValidationError(ValueError):
 
 DEFAULT_SETTINGS_FILE = Path(__file__).resolve().parents[2] / "data" / "config" / "settings.json"
 
-DEFAULT_SUMMARY_PROMPT_FILE = Path(__file__).resolve().parents[2] / "data" / "prompts" / "md_gen_summary_system_prompt.txt"
+DEFAULT_SUMMARY_PROMPT_FILE = Path(__file__).resolve().parents[2] / "data" / "prompts" / "md_gen_summary_system_prompt.md"
 
 BUILTIN_SUMMARY_PROMPT = (
     "You are an automated data-extraction parser. You process OCR text and output a concise summary "
