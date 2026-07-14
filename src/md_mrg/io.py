@@ -115,11 +115,17 @@ def flatten_loose_fragments(documents: tuple[dict[str, Any], ...]) -> tuple[Frag
             image_file = str(raw_fragment.get("image_file", ""))
             markdown_file = str(raw_fragment.get("markdown_file", ""))
             anchors = raw_fragment.get("anchors") if isinstance(raw_fragment.get("anchors"), dict) else {}
+            if anchors is None:
+                raise ValueError(f"Anchors for fragment {source_document_id}:{index} are None")
+            
             content_fingerprint = (
                 raw_fragment.get("content_fingerprint")
                 if isinstance(raw_fragment.get("content_fingerprint"), dict)
                 else {}
             )
+            if content_fingerprint is None:
+                raise ValueError(f"Content fingerprint for fragment {source_document_id}:{index} is None")
+            
             fragment_id = f"{source_document_id}:{sequence_number}:{markdown_file}"
             fragments.append(
                 FragmentRecord(

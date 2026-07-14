@@ -4,7 +4,7 @@ import pytest
 from PIL import Image
 
 import md_gen.rasterizer as rasterizer
-from md_gen.discovery import WorkItem
+from md_gen.discovery import SourceType, FileItem
 from md_gen.rasterizer import (
     PdfRasterizationError,
     _build_output_image_path,
@@ -14,8 +14,8 @@ from md_gen.rasterizer import (
 )
 
 
-def _make_work_item(path: Path, source_type: str = "pdf", order_index: int = 0, ordering_key: str | None = None) -> WorkItem:
-    return WorkItem(
+def _make_work_item(path: Path, source_type: SourceType = "pdf", order_index: int = 0, ordering_key: str | None = None) -> FileItem:
+    return FileItem(
         source_path=path,
         source_type=source_type,
         order_index=order_index,
@@ -135,11 +135,11 @@ def test_rasterize_pdf_work_item_preserves_page_order_and_metadata(tmp_path: Pat
     assert tuple(page.page_index for page in pages) == (0, 1)
     assert tuple(page.page_number for page in pages) == (1, 2)
     assert tuple(page.total_pages for page in pages) == (2, 2)
-    assert tuple(page.source_order_index for page in pages) == (3, 3)
+    assert tuple(page.source_index for page in pages) == (3, 3)
     assert tuple(page.source_ordering_key for page in pages) == ("manual-key", "manual-key")
     assert tuple(page.image_width for page in pages) == (600, 400)
     assert tuple(page.image_height for page in pages) == (240, 400)
-    assert all(page.source_pdf_path == pdf_path for page in pages)
+    assert all(page.source_path == pdf_path for page in pages)
     assert all(page.image_path.exists() for page in pages)
     assert all(page.image_path.parent == output_dir for page in pages)
     assert pages[0].image_path.name.endswith("-p0001.png")
@@ -259,12 +259,12 @@ def test_rasterize_pdf_work_item_forwards_render_scale_with_fake_page(tmp_path: 
 def test_rasterize_pdf_work_items_filters_non_pdf_and_flattens_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     out_dir = tmp_path / "im-temp"
     item_pdf_1 = _make_work_item(tmp_path / "a.pdf", source_type="pdf", order_index=1, ordering_key="a")
-    item_png = _make_work_item(tmp_path / "b.png", source_type="png", order_index=2, ordering_key="b")
+    item_png = _make_work_item(tmp_path / "b.png", source_type="image", order_index=2, ordering_key="b")
     item_pdf_2 = _make_work_item(tmp_path / "c.pdf", source_type="pdf", order_index=3, ordering_key="c")
 
     calls: list[tuple[str, Path, float]] = []
 
-    def _stub_rasterize(work_item: WorkItem, output_dir: Path, render_scale: float):
+    def _stub_rasterize(work_item: FileItem, output_dir: Path, render_scale: float):
         calls.append((work_item.source_path.name, output_dir, render_scale))
         return (f"{work_item.source_path.stem}-p1",)
 

@@ -4,7 +4,6 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
-    "chat.byokUtilityModelDefault": "none",
     "chat.utilityModel": "",
     "chat.utilitySmallModel": ""
 }

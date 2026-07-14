@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from types import SimpleNamespace
 
 from .config import ConfigValidationError, build_config_from_args
 from .foundation import run_foundation_bootstrap
@@ -41,7 +42,8 @@ def main() -> int:
     parser = build_parser()
     try:
         args = parser.parse_args()
-        config = build_config_from_args(args)
+        simple_args = SimpleNamespace(**vars(args))
+        config = build_config_from_args(simple_args)
     except ConfigValidationError as exc:
         print(f"ERROR code={exc.error_code} message={exc}")
         return 2

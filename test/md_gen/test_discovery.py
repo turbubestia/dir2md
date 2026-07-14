@@ -1,7 +1,8 @@
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 
-from md_gen.config import build_config_from_args
+from md_gen.config import AppConfig, build_config_from_args
 from md_gen.discovery import (
 	_is_supported_file,
 	_ordering_key,
@@ -13,8 +14,8 @@ from md_gen.discovery import (
 )
 
 
-def _make_args(source_dir: Path, output_dir: Path) -> Namespace:
-	return Namespace(
+def _make_args(source_dir: Path, output_dir: Path) -> SimpleNamespace:
+	return SimpleNamespace(
 		source=str(source_dir),
 		output=str(output_dir),
 		summary_prompt=None,
@@ -33,7 +34,7 @@ def _make_args(source_dir: Path, output_dir: Path) -> Namespace:
 	)
 
 
-def _make_config(tmp_path: Path, file_names: tuple[str, ...]) -> tuple[object, Path]:
+def _make_config(tmp_path: Path, file_names: tuple[str, ...]) -> tuple[AppConfig, Path]:
 	source_dir = tmp_path / "source"
 	output_dir = tmp_path / "output"
 	source_dir.mkdir(parents=True, exist_ok=True)

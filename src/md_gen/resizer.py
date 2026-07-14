@@ -27,6 +27,15 @@ def _target_dimensions(width: int, height: int, max_longest_edge_px: int) -> tup
     return max(1, int(width * max_longest_edge_px / height)), max_longest_edge_px
 
 
+def resize_image(image : Image.Image, max_longest_edge_px: int) -> Image.Image:
+    original_width, original_height = image.size
+    resized_width, resized_height = _target_dimensions(original_width, original_height, max_longest_edge_px)
+    needs_resize = (resized_width, resized_height) != (original_width, original_height)
+    if needs_resize:
+        return image.resize((resized_width, resized_height), Image.Resampling.LANCZOS)
+    return image
+
+
 def resize_image_for_ocr(
     source_image_path: Path,
     output_dir: Path,

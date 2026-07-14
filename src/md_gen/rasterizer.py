@@ -6,7 +6,7 @@ from typing import Literal
 
 import pypdfium2 as pdfium
 
-from .discovery import WorkItem
+from . import discovery
 
 PdfRasterizationErrorCode = Literal[
     "missing_input",
@@ -18,9 +18,9 @@ PdfRasterizationErrorCode = Literal[
 
 @dataclass(frozen=True)
 class PdfPageRaster:
-    source_pdf_path: Path
-    source_order_index: int
-    source_ordering_key: str
+    source_type: int # 0 for PDF and 1 for image
+    source_path: Path
+    source_index: int
     page_index: int
     page_number: int
     total_pages: int
@@ -51,7 +51,7 @@ def _build_output_image_path(source_pdf_path: Path, page_number: int, output_dir
 
 
 def rasterize_pdf_work_item(
-    work_item: WorkItem,
+    work_item: discovery.FileItem,
     output_dir: Path,
     render_scale: float = 2.0,
 ) -> tuple[PdfPageRaster, ...]:
@@ -83,7 +83,7 @@ def rasterize_pdf_work_item(
             page = document.get_page(page_index)
             page_number = page_index + 1
             try:
-                bitmap = page.render(scale=render_scale)
+                bitmap = page.render(scale=1)
                 image = bitmap.to_pil()
                 output_path = _build_output_image_path(source_pdf_path, page_number, output_dir)
                 image_width, image_height = image.size
@@ -101,8 +101,8 @@ def rasterize_pdf_work_item(
 
             pages.append(
                 PdfPageRaster(
-                    source_pdf_path = source_pdf_path,
-                    source_order_index = work_item.order_index,
+                    source_path = source_pdf_path,
+                    source_index = work_item.order_index,
                     source_ordering_key = work_item.ordering_key,
                     page_index = page_index,
                     page_number = page_number,
@@ -119,7 +119,7 @@ def rasterize_pdf_work_item(
 
 
 def rasterize_pdf_work_items(
-    work_items: tuple[WorkItem, ...],
+    work_items: tuple[discovery.FileItem, ...],
     output_dir: Path,
     render_scale: float = 2.0,
 ) -> tuple[PdfPageRaster, ...]:
