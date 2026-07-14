@@ -24,8 +24,7 @@ requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["test/md_gen"]
+testpaths = ["test"]
 addopts = "--cov=md_gen --cov-report=term-missing --cov-fail-under=80"
 
 [tool.hatch.build.targets.wheel]

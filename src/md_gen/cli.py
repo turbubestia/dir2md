@@ -14,11 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--source", required=True, help="Source directory containing top-level input files.")
     parser.add_argument("--output", required=True, help="Output directory root for generated artifacts.")
-    parser.add_argument(
-        "--summary-prompt",
-        default=None,
-        help="Optional path to a summary system prompt file.",
-    )
+    parser.add_argument( "--summary-prompt", default=None, help="Optional path to a summary system prompt file.", )
 
     parser.add_argument("--ocr-model-endpoint", default=None)
     parser.add_argument("--ocr-model-name", default=None)

@@ -9,6 +9,9 @@ You are a Principal Software Engineer. Your job is to translate the conceptual a
 
 This output will serve as the final, direct instructions (`.prompt.md`) for the coding phase.
 
+## Traceability Linkage
+At the very beginning of the target file, insert a dedicated metadata block that explicitly links back to the source analysis document using a relative markdown link (e.g., `[Analysis Reference](./{issue_name}.plan.analysis.md)`). Each Phase and Step in this plan must explicitly reference the specific Section ID or Requirement ID from that analysis document (e.g., *"Implementing requirements from Analysis Section 2.1"*). This maintains strict traceability, ensuring that every concrete "how" in this blueprint is directly justified by a validated "what" from the analysis.
+
 ## Input Sources
 - **Primary Input:** Read the analysis from `./issues/{issue_name}.plan.analysis.md`.
 - **Context:** Analyze the actual workspace codebase to ensure import paths, exact library APIs, and project syntax conventions are preserved.
