@@ -13,11 +13,19 @@
         "timeout_seconds": 120,
         "max_retries": 3
     },
-    "summary": {
-        "prompt_path": "data/prompts/md_gen_summary_system_prompt.md"
+    "md_gen": {
+        "summary": {
+            "prompt_path": "data/prompts/md_gen_summary_system_prompt.md"
+        },
+        "image": {
+            "max_longest_edge_px": 1540,
+            "token_threshold": 4096
+        }
     },
-    "image": {
-        "max_longest_edge_px": 1540,
-        "token_threshold": 4096
+    "md_mgr": {
+        "rolling_window": 5,
+        "score" : {
+            "prompt_path": "data/prompts/md_mgr_score_system_prompt.md"
+        }
     }
 }

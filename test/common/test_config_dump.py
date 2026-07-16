@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from md_gen.config import (
+from common.config import (
     AppConfig,
     ImageSettings,
     LlamaModelSettings,
@@ -8,7 +8,8 @@ from md_gen.config import (
     PromptSettings,
     RuntimeSettings,
 )
-from md_gen.config_dump import format_config_dump
+
+from common.config_dump import format_config_dump
 
 
 def test_format_config_dump_contains_all_sections_and_fields() -> None:

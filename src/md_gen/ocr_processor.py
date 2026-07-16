@@ -7,7 +7,7 @@ from PIL import Image
 from common.gateway import LlamaOcrGateway
 
 if TYPE_CHECKING:
-    from .config import AppConfig
+    from ..common.config import AppConfig
 
 
 def extract_markdown(config: AppConfig, image: Image.Image) -> str:

@@ -2,7 +2,8 @@ from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
 
-from md_gen.config import AppConfig, build_config_from_args
+from common.config import AppConfig, build_config_from_args
+
 from md_gen.discovery import (
 	_is_supported_file,
 	_ordering_key,

@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 from common.gateway import LlamaLanguageGateway, TextRequest
-
-if TYPE_CHECKING:
-    from .config import AppConfig
+from common.config import AppConfig
 
 
 def summarize_page(config: AppConfig, page_markdown: str) -> str:

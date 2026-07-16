@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from md_gen.config import AppConfig, ImageSettings, LlamaModelSettings, PathSettings, PromptSettings, RuntimeSettings
+from common.config import AppConfig, ImageSettings, LlamaModelSettings, PathSettings, PromptSettings, RuntimeSettings
 from md_gen.discovery import FileItem
 from md_gen.page_processor import process_file
 

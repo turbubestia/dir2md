@@ -1,5 +1,10 @@
 """Shared connectors and utilities across modules."""
 
+from .config import (
+    AppConfig, 
+    build_config_from_args
+)
+
 # Common errors and exceptions
 from .gateway import (
     GatewayError, 
@@ -20,6 +25,9 @@ from .gateway import (
 )
 
 __all__ = [
+    "AppConfig",
+    "build_config_from_args",
+# ---
     "GatewayError",
     "GatewayErrorCode",
 # ---

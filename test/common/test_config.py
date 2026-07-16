@@ -5,14 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
-import md_gen.config as config
+import common.config as config
 
 
 def make_args(source: Path, output: Path, **overrides: object) -> SimpleNamespace:
 	values = {
 		"source": str(source),
 		"output": str(output),
-		"summary_prompt": None,
 		"ocr_model_endpoint": None,
 		"ocr_model_name": None,
 		"ocr_timeout_seconds": None,
@@ -21,6 +20,7 @@ def make_args(source: Path, output: Path, **overrides: object) -> SimpleNamespac
 		"language_model_name": None,
 		"language_timeout_seconds": None,
 		"language_max_retries": None,
+		"summary_prompt": None,
 		"max_longest_edge_px": None,
 		"token_threshold": None,
 		"dry_run": False,
@@ -161,8 +161,7 @@ def test_build_path_settings_from_args(tmp_path: Path) -> None:
 	("args_summary_prompt", "json_summary", "expected_text"),
 	[
 		("args", {}, "args prompt"),
-		(None, {"prompt_path": "json"}, "json prompt"),
-		(None, {}, config.BUILTIN_SUMMARY_PROMPT),
+		(None, {"prompt_path": "json"}, "json prompt")
 	],
 )
 def test_build_prompt_settings_from_args_uses_expected_prompt_source(
@@ -326,15 +325,20 @@ def test_build_config_from_args_assembles_full_config(monkeypatch: pytest.Monkey
 		config,
 		"read_json_settings_file",
 		lambda: {
-			"summary": {"prompt_path": str(prompt_file)},
-			"ocr_model": {"endpoint": "http://ocr-endpoint", "model": "ocr-model"},
+			"ocr_model": {
+				"endpoint": "http://ocr-endpoint", 
+				"model": "ocr-model"
+			},
 			"language_model": {
 				"endpoint": "http://language-endpoint",
 				"model": "language-model",
 				"timeout_seconds": 44.0,
 				"max_retries": 5,
 			},
-			"image": {"max_longest_edge_px": 900, "token_threshold": 7777},
+			"md_gen": {
+				"summary": {"prompt_path": str(prompt_file)},
+				"image": {"max_longest_edge_px": 900, "token_threshold": 7777},
+			}
 		},
 	)
 	args = make_args(source_dir, output_dir, dry_run=True, overwrite=True)

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 
 from common.gateway import GatewayError
+from common.config import AppConfig, ConfigValidationError
 
-from .config import AppConfig, ConfigValidationError
 from .discovery import build_work_items
 from .page_processor import process_file
 
