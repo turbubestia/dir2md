@@ -24,7 +24,7 @@ At the very beginning of the target file, insert a dedicated metadata block that
 
 ### 1. Clarifying Code vs. Pseudocode
 - Do **not** modify or create any implementation code in your actual workspace files yet.
-- **Do** include exact code snippets, precise function signatures, import paths, database queries, and algorithmic pseudo-code *inside* the target `.prompt.md` file, but not that much that will bloat the prompt, be precise and concise.
+- Include function signatures, import paths, database queries, and algorithmic pseudo-code *inside* the target `.prompt.md` file, but NOT TOO MUCH that will bloat the prompt, be precise and concise, and only when necessary to clarify the implementation steps.
 
 ### 2. Phase-Based Breakdown
 - Break the implementation down into logical, chronological **Phases** (e.g., Database Migrations, API/Backend, Frontend, Tests).
@@ -39,14 +39,3 @@ Your output in `./issues/{issue_name}.prompt.md` must strictly follow this templ
 
 > **Core Objective:** Detailed step-by-step technical execution blueprint for implementing the requirements specified in the analysis.
 
-## Phase 1: [e.g., Database & Data Model]
-### Step 1.1: [e.g., Define migration schemas]
-- **Target File:** `./src/db/schema.prisma`
-- **Action:** Add the new model fields.
-- **Code Blueprint:**
-  ```prisma
-  // Exact code block/schema change to copy-paste
-  model User {
-    id        String @id @default(uuid())
-    ipAddress String?
-  }

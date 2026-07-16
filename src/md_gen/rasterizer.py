@@ -60,6 +60,8 @@ def rasterize_page(source_path: Path, max_edge_size: int, page_number: int | Non
 
     if suffix == ".pdf":
         try:
+            # Pdfium reads the PDF container/catalog first, then defers heavy page decoding.
+            # This keeps open-time cost low even for large multi-page documents.
             document = pdfium.PdfDocument(source_path)
         except pdfium.PdfiumError as exc:
             error_code = _classify_pdfium_error(str(exc))
@@ -80,6 +82,8 @@ def rasterize_page(source_path: Path, max_edge_size: int, page_number: int | Non
                     f"Invalid page number {page_number} for PDF with {total_pages} page(s)",
                 )
 
+            # Accessing one page triggers work for that page only.
+            # Pdfium does not rasterize or fully load the rest of the document here.
             page = document.get_page(page_number - 1)
             try:
                 bitmap = page.render(scale=1)
@@ -115,6 +119,8 @@ def get_pdf_page_count(source_path: Path) -> int:
         raise RasterizationError(source_path, "unsupported_file", f"Not a PDF: {source_path}")
 
     try:
+        # Page count comes from document structure metadata.
+        # Pdfium can return this without rendering every page into bitmaps.
         document = pdfium.PdfDocument(source_path)
     except pdfium.PdfiumError as exc:
         error_code = _classify_pdfium_error(str(exc))

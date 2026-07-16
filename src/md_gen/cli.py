@@ -4,6 +4,7 @@ import argparse
 from types import SimpleNamespace
 
 from .config import ConfigValidationError, build_config_from_args
+from .config_dump import format_config_dump
 from .foundation import run_foundation_bootstrap
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--dry-run", action="store_true", default=False)
     parser.add_argument("--overwrite", action="store_true", default=False)
+    parser.add_argument("--verbose", action="store_true", default=False)
     return parser
 
 
@@ -46,6 +48,9 @@ def main() -> int:
     except Exception as exc:
         print(f"ERROR code=cli_argument_error message={type(exc).__name__}: {exc}")
         return 2
+
+    if args.verbose:
+        print(format_config_dump(config))
 
     return run_foundation_bootstrap(config)
 
