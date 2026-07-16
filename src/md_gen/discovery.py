@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -13,20 +14,26 @@ _DISCOVERY_PREFIX = "DISCOVERY"
 
 SourceType = Literal["pdf", "image"]
 
+_SPLIT_RE = re.compile(r"(\d+)")
+
+
 @dataclass(frozen=True)
-class WorkItem:
+class FileItem:
     source_path: Path
     source_type: SourceType
     order_index: int
-    ordering_key: str
+    ordering_key: tuple[str | int, ...]
 
 
-# we will only look for files in the top-level of the source directory, 
-# and we will not recurse into subdirectories, therefore files must have 
-# unique names in the source directory. We will use the file name as the 
-# ordering key for sorting work items.
-def _ordering_key(path: Path) -> str:
-    return path.name.lower()
+# we will only look for files in the top-level of the source directory,
+# and we will not recurse into subdirectories, therefore files must have
+# unique names in the source directory. We will use the file name as the
+# ordering key for sorting work items, comparing numeric runs numerically.
+def _ordering_key(path: Path) -> tuple[str | int, ...]:
+    return tuple(
+        int(segment) if segment.isdigit() else segment.lower()
+        for segment in _SPLIT_RE.split(path.name)
+    )
 
 
 def _print_discovery_status(path: Path, *, status: str, reason: str = "") -> None:
@@ -68,9 +75,9 @@ def _source_type_for_file(path: Path) -> SourceType:
     return "image"
 
 
-def normalize_work_items(files: tuple[Path, ...]) -> tuple[WorkItem, ...]:
+def normalize_work_items(files: tuple[Path, ...]) -> tuple[FileItem, ...]:
     return tuple(
-        WorkItem(
+        FileItem(
             source_path=path,
             source_type=_source_type_for_file(path),
             order_index=index,
@@ -83,7 +90,7 @@ def normalize_work_items(files: tuple[Path, ...]) -> tuple[WorkItem, ...]:
 # and return them as a tuple. The work items will be sorted by the ordering key, which is 
 # the file name in lowercase. The order index will be assigned based on the order of the
 # files in the source directory after sorting.
-def build_work_items(config: AppConfig) -> tuple[WorkItem, ...]:
+def build_work_items(config: AppConfig) -> tuple[FileItem, ...]:
     discovered_files = discover_supported_files(config)
     work_items = normalize_work_items(discovered_files)
     return work_items

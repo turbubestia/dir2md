@@ -129,9 +129,7 @@ def _propose_document_stem(
         try:
             with LlamaLanguageGateway(
                 endpoint_url=naming_endpoint_url,
-                model_name=naming_model_name,
-                request_timeout_seconds=naming_timeout_seconds,
-                request_max_retries=naming_max_retries,
+                model_name=naming_model_name
             ) as gateway:
                 response = gateway.send_text_request(TextRequest(system_prompt=base_prompt, user_prompt=user_prompt))
                 candidate = _extract_llm_filename_stem(response.text)

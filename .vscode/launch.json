@@ -11,6 +11,18 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "python": "${workspaceFolder}/.venv/bin/python"
+        },
+        {
+            "name": "Launch minimal ocr test",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "md_gen.cli",
+            "args": [
+                "--source", "C:\\Users\\claud\\Development\\test\\source",
+                "--output", "C:\\Users\\claud\\Development\\test\\output",
+                "--overwrite"
+            ],
+            "console": "integratedTerminal"
         }
     ]
 }

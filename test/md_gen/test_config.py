@@ -1,13 +1,14 @@
 import json
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import md_gen.config as config
 
 
-def make_args(source: Path, output: Path, **overrides: object) -> Namespace:
+def make_args(source: Path, output: Path, **overrides: object) -> SimpleNamespace:
 	values = {
 		"source": str(source),
 		"output": str(output),
@@ -26,7 +27,7 @@ def make_args(source: Path, output: Path, **overrides: object) -> Namespace:
 		"overwrite": False,
 	}
 	values.update(overrides)
-	return Namespace(**values)
+	return SimpleNamespace(**values)
 
 
 def test_config_validation_error_stores_error_code() -> None:
@@ -174,15 +175,15 @@ def test_build_prompt_settings_from_args_uses_expected_prompt_source(
 	prompt_file.write_text(f"{expected_text}", encoding="utf-8")
 
 	if args_summary_prompt == "args":
-		args = Namespace(summary_prompt=str(prompt_file))
+		args = SimpleNamespace(summary_prompt=str(prompt_file))
 		json_config = {}
 		expected_path = prompt_file.resolve()
 	elif json_summary:
-		args = Namespace(summary_prompt=None)
+		args = SimpleNamespace(summary_prompt=None)
 		json_config = {"prompt_path": str(prompt_file)}
 		expected_path = str(prompt_file.resolve())
 	else:
-		args = Namespace(summary_prompt=None)
+		args = SimpleNamespace(summary_prompt=None)
 		json_config = {}
 		expected_path = None
 
@@ -194,7 +195,7 @@ def test_build_prompt_settings_from_args_uses_expected_prompt_source(
 
 def test_build_prompt_settings_from_args_raises_for_unreadable_file(tmp_path: Path) -> None:
 	prompt_file = tmp_path / "missing-prompt.txt"
-	args = Namespace(summary_prompt=str(prompt_file))
+	args = SimpleNamespace(summary_prompt=str(prompt_file))
 
 	with pytest.raises(config.ConfigValidationError) as exc_info:
 		config.build_prompt_settings_from_args(args, {})
@@ -203,7 +204,7 @@ def test_build_prompt_settings_from_args_raises_for_unreadable_file(tmp_path: Pa
 
 
 def test_build_llama_model_settings_from_args_uses_namespace_values() -> None:
-	args = Namespace(
+	args = SimpleNamespace(
 		model_endpoint="http://namespace-endpoint",
 		model_name="namespace-model",
 		timeout_seconds=12.5,
@@ -219,7 +220,7 @@ def test_build_llama_model_settings_from_args_uses_namespace_values() -> None:
 
 
 def test_build_llama_model_settings_from_args_uses_json_values() -> None:
-	args = Namespace(
+	args = SimpleNamespace(
 		model_endpoint=None,
 		model_name=None,
 		timeout_seconds=None,
@@ -241,7 +242,7 @@ def test_build_llama_model_settings_from_args_uses_json_values() -> None:
 
 
 def test_build_llama_model_settings_from_args_uses_defaults_and_reports_them(capsys: pytest.CaptureFixture[str]) -> None:
-	args = Namespace(
+	args = SimpleNamespace(
 		model_endpoint="http://default-endpoint",
 		model_name="default-model",
 		timeout_seconds=None,
@@ -268,7 +269,7 @@ def test_build_llama_model_settings_from_args_requires_endpoint_and_model(
 	json_config: dict,
 	expected_code: str,
 ) -> None:
-	args = Namespace(
+	args = SimpleNamespace(
 		model_endpoint=None,
 		model_name=None,
 		timeout_seconds=None,
@@ -282,7 +283,7 @@ def test_build_llama_model_settings_from_args_requires_endpoint_and_model(
 
 
 def test_build_image_settings_from_args_uses_namespace_values() -> None:
-	args = Namespace(max_longest_edge_px=2048, token_threshold=4096)
+	args = SimpleNamespace(max_longest_edge_px=2048, token_threshold=4096)
 
 	image_settings = config.build_image_settings_from_args(args, {})
 
@@ -291,7 +292,7 @@ def test_build_image_settings_from_args_uses_namespace_values() -> None:
 
 
 def test_build_image_settings_from_args_uses_json_values() -> None:
-	args = Namespace(max_longest_edge_px=None, token_threshold=None)
+	args = SimpleNamespace(max_longest_edge_px=None, token_threshold=None)
 
 	image_settings = config.build_image_settings_from_args(
 		args,
@@ -303,7 +304,7 @@ def test_build_image_settings_from_args_uses_json_values() -> None:
 
 
 def test_build_image_settings_from_args_uses_defaults_and_reports_them(capsys: pytest.CaptureFixture[str]) -> None:
-	args = Namespace(max_longest_edge_px=None, token_threshold=None)
+	args = SimpleNamespace(max_longest_edge_px=None, token_threshold=None)
 
 	image_settings = config.build_image_settings_from_args(args, {})
 	captured = capsys.readouterr()

@@ -1,7 +1,8 @@
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 
-from md_gen.config import build_config_from_args
+from md_gen.config import AppConfig, build_config_from_args
 from md_gen.discovery import (
 	_is_supported_file,
 	_ordering_key,
@@ -13,8 +14,8 @@ from md_gen.discovery import (
 )
 
 
-def _make_args(source_dir: Path, output_dir: Path) -> Namespace:
-	return Namespace(
+def _make_args(source_dir: Path, output_dir: Path) -> SimpleNamespace:
+	return SimpleNamespace(
 		source=str(source_dir),
 		output=str(output_dir),
 		summary_prompt=None,
@@ -33,7 +34,7 @@ def _make_args(source_dir: Path, output_dir: Path) -> Namespace:
 	)
 
 
-def _make_config(tmp_path: Path, file_names: tuple[str, ...]) -> tuple[object, Path]:
+def _make_config(tmp_path: Path, file_names: tuple[str, ...]) -> tuple[AppConfig, Path]:
 	source_dir = tmp_path / "source"
 	output_dir = tmp_path / "output"
 	source_dir.mkdir(parents=True, exist_ok=True)
@@ -52,8 +53,9 @@ def _make_config(tmp_path: Path, file_names: tuple[str, ...]) -> tuple[object, P
 	return config, source_dir
 
 
-def test_ordering_key_uses_lowercase_filename_only() -> None:
-	assert _ordering_key(Path("/x/Dir/File.PDF")) == "file.pdf"
+def test_ordering_key_uses_natural_sort_and_lowercase() -> None:
+	assert _ordering_key(Path("/x/Dir/File.PDF")) == ("file.pdf",)
+	assert _ordering_key(Path("/x/file2.pdf")) < _ordering_key(Path("/x/file10.pdf"))
 
 
 def test_print_discovery_status_includes_optional_reason(capsys) -> None:
@@ -152,12 +154,12 @@ def test_normalize_work_items_builds_ordered_records() -> None:
 	assert work_items[0].source_path == Path("B.JPG")
 	assert work_items[0].source_type == "image"
 	assert work_items[0].order_index == 0
-	assert work_items[0].ordering_key == "b.jpg"
+	assert work_items[0].ordering_key == ("b.jpg",)
 
 	assert work_items[1].source_path == Path("a.PDF")
 	assert work_items[1].source_type == "pdf"
 	assert work_items[1].order_index == 1
-	assert work_items[1].ordering_key == "a.pdf"
+	assert work_items[1].ordering_key == ("a.pdf",)
 
 
 def test_build_work_items_orchestrates_discovery_and_normalization(tmp_path: Path) -> None:
@@ -169,10 +171,22 @@ def test_build_work_items_orchestrates_discovery_and_normalization(tmp_path: Pat
 	assert work_items[0].source_path == (source_dir / "a.pdf").resolve()
 	assert work_items[0].source_type == "pdf"
 	assert work_items[0].order_index == 0
-	assert work_items[0].ordering_key == "a.pdf"
+	assert work_items[0].ordering_key == ("a.pdf",)
 
 	assert work_items[1].source_path == (source_dir / "B.JPG").resolve()
 	assert work_items[1].source_type == "image"
 	assert work_items[1].order_index == 1
-	assert work_items[1].ordering_key == "b.jpg"
+	assert work_items[1].ordering_key == ("b.jpg",)
+
+
+def test_discover_supported_files_uses_natural_sort(tmp_path: Path) -> None:
+	config, source_dir = _make_config(tmp_path, ("file10.pdf", "file2.pdf", "file1.png"))
+
+	work_items = build_work_items(config)
+
+	assert tuple(item.source_path.name for item in work_items) == (
+		"file1.png",
+		"file2.pdf",
+		"file10.pdf",
+	)
 

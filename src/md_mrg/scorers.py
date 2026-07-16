@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from time import perf_counter
 
-from common.gateway import BridgeScoreRequest, GatewayError, LlamaBridgeScoreGateway
+from common.gateway import GatewayError, LlamaLanguageGateway, TextRequest
 
 from .models import CandidateEdge, DecisionStatus, EdgeScore
 
@@ -31,26 +31,27 @@ class LlmEdgeScorer(EdgeScorer):
 
     def score_edges(self, candidates: tuple[CandidateEdge, ...]) -> tuple[EdgeScore, ...]:
         scored: list[EdgeScore] = []
-        with LlamaBridgeScoreGateway(
+        with LlamaLanguageGateway(
             endpoint_url=self.endpoint_url,
             model_name=self.model_name,
-            request_timeout_seconds=self.timeout_seconds,
-            request_max_retries=self.max_retries,
         ) as gateway:
             for candidate in candidates:
                 started = perf_counter()
                 try:
-                    response = gateway.send_bridge_score_request(
-                        BridgeScoreRequest(
-                            page_a_end=candidate.from_fragment.last_line,
-                            page_a_summary=candidate.from_fragment.snippet,
-                            page_b_start=candidate.to_fragment.first_line,
-                            page_b_summary=candidate.to_fragment.snippet,
+                    response = gateway.send_text_request(
+                        TextRequest(
                             system_prompt=self.system_prompt,
+                            user_prompt=(
+                                f"Page A end: {candidate.from_fragment.last_line}\n"
+                                f"Page A summary: {candidate.from_fragment.snippet}\n"
+                                f"Page B start: {candidate.to_fragment.first_line}\n"
+                                f"Page B summary: {candidate.to_fragment.snippet}\n"
+                                "Return a score between 0 and 10 and a reason."
+                            )
                         )
                     )
-                    score = float(response.bridge_score)
-                    reason = response.reason
+                    score = 0 #float(response.bridge_score)
+                    reason = "" #response.reason
                 except GatewayError as exc:
                     score = 0.0
                     reason = f"llm_error:{exc.error_code}"

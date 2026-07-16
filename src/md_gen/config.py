@@ -15,18 +15,7 @@ class ConfigValidationError(ValueError):
 
 
 DEFAULT_SETTINGS_FILE = Path(__file__).resolve().parents[2] / "data" / "config" / "settings.json"
-
-DEFAULT_SUMMARY_PROMPT_FILE = Path(__file__).resolve().parents[2] / "data" / "prompts" / "md_gen_summary_system_prompt.txt"
-
-BUILTIN_SUMMARY_PROMPT = (
-    "You are an automated data-extraction parser. You process OCR text and output a concise summary "
-    "no longer than three lines.\n\n"
-    "CRITICAL INSTRUCTIONS:\n"
-    "- Do not use thinking tags (<think>...</think>).\n"
-    "- Do not output chain-of-thought reasoning, explanations, or introductory text.\n"
-    "- Return only plain text summary content.\n"
-    "- Avoid markdown formatting."
-)
+DEFAULT_SUMMARY_PROMPT_FILE = Path(__file__).resolve().parents[2] / "data" / "prompts" / "md_gen_summary_system_prompt.md"
 
 
 @dataclass(frozen=True)
@@ -137,6 +126,8 @@ def build_path_settings_from_args(args: SimpleNamespace) -> PathSettings:
 
 
 def build_prompt_settings_from_args(args: SimpleNamespace, json_config: dict) -> PromptSettings:
+    summary_prompt_text = None
+
     summary_prompt_path = _resolve_optional_file(getattr(args, "summary_prompt", None))
     if summary_prompt_path is None:
         summary_prompt_path = json_config.get("prompt_path", None)
@@ -149,8 +140,12 @@ def build_prompt_settings_from_args(args: SimpleNamespace, json_config: dict) ->
                 "summary_prompt_read_failed",
                 f"Failed to read summary prompt file at: {summary_prompt_path}",
             ) from exc
-    else:
-        summary_prompt_text = BUILTIN_SUMMARY_PROMPT
+    
+    if summary_prompt_text is None:
+        raise ConfigValidationError(
+            "summary_prompt_not_specified",
+            "Summary prompt path must be specified either in the JSON config or as a command-line argument.",
+        ) 
     
     return PromptSettings(
         summary_prompt_path=summary_prompt_path,

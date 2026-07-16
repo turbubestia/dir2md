@@ -4,23 +4,7 @@ import pytest
 from PIL import Image
 
 import md_gen.rasterizer as rasterizer
-from md_gen.discovery import WorkItem
-from md_gen.rasterizer import (
-    PdfRasterizationError,
-    _build_output_image_path,
-    _classify_pdfium_error_message,
-    rasterize_pdf_work_item,
-    rasterize_pdf_work_items,
-)
-
-
-def _make_work_item(path: Path, source_type: str = "pdf", order_index: int = 0, ordering_key: str | None = None) -> WorkItem:
-    return WorkItem(
-        source_path=path,
-        source_type=source_type,
-        order_index=order_index,
-        ordering_key=ordering_key or path.as_posix().lower(),
-    )
+from md_gen.rasterizer import RasterizationError, get_pdf_page_count, rasterize_page, resize_image
 
 
 def _make_test_pdf(pdf_path: Path, page_sizes: tuple[tuple[int, int], ...] = ((300, 120), (200, 200))) -> None:
@@ -31,18 +15,19 @@ def _make_test_pdf(pdf_path: Path, page_sizes: tuple[tuple[int, int], ...] = ((3
         image.close()
 
 
+def _make_test_image(image_path: Path, size: tuple[int, int]) -> None:
+    image = Image.new("RGB", size, color=(128, 128, 128))
+    image.save(image_path)
+    image.close()
+
+
 class _FakePdfiumError(Exception):
     pass
 
 
 class _FakeImage:
-    def __init__(self, size: tuple[int, int], save_log: list[tuple[Path, str]]):
+    def __init__(self, size: tuple[int, int]):
         self.size = size
-        self._save_log = save_log
-
-    def save(self, output_path: Path, format: str) -> None:
-        self._save_log.append((output_path, format))
-        output_path.write_bytes(b"png")
 
     def close(self) -> None:
         return None
@@ -61,23 +46,18 @@ class _FakePage:
         self,
         size: tuple[int, int] = (123, 77),
         render_error: Exception | None = None,
-        render_scales: list[float] | None = None,
-        save_log: list[tuple[Path, str]] | None = None,
         close_log: list[str] | None = None,
         page_name: str = "page",
     ):
         self._size = size
         self._render_error = render_error
-        self._render_scales = render_scales if render_scales is not None else []
-        self._save_log = save_log if save_log is not None else []
         self._close_log = close_log if close_log is not None else []
         self._page_name = page_name
 
     def render(self, scale: float) -> _FakeBitmap:
-        self._render_scales.append(scale)
         if self._render_error is not None:
             raise self._render_error
-        return _FakeBitmap(_FakeImage(self._size, self._save_log))
+        return _FakeBitmap(_FakeImage(self._size))
 
     def close(self) -> None:
         self._close_log.append(f"{self._page_name}.close")
@@ -108,50 +88,66 @@ class _FakeDocument:
         ("some other open problem", "unreadable_pdf"),
     ),
 )
-def test_classify_pdfium_error_message_branches(message: str, expected: str) -> None:
-    assert _classify_pdfium_error_message(message) == expected
+def test_classify_pdfium_error_branches(message: str, expected: str) -> None:
+    assert rasterizer._classify_pdfium_error(message) == expected
 
 
-def test_build_output_image_path_formats_expected_name(tmp_path: Path) -> None:
-    source_pdf = tmp_path / "sample doc(1).pdf"
-    output_dir = tmp_path / "im-temp"
+def test_resize_image_downscales_longest_edge_and_preserves_aspect_ratio() -> None:
+    image = Image.new("RGB", (4000, 1000), color=(220, 220, 220))
+    resized = resize_image(image, 1540)
 
-    output_path = _build_output_image_path(source_pdf, page_number=7, output_dir=output_dir)
+    assert resized.size == (1540, 385)
+    image.close()
+    resized.close()
 
-    assert output_path == output_dir / "sample doc(1)-p0007.png"
+
+def test_resize_image_keeps_small_image_dimensions_unchanged() -> None:
+    image = Image.new("RGB", (1000, 500), color=(220, 220, 220))
+    resized = resize_image(image, 1540)
+
+    assert resized.size == (1000, 500)
+    image.close()
+    resized.close()
 
 
-def test_rasterize_pdf_work_item_preserves_page_order_and_metadata(tmp_path: Path) -> None:
-    pdf_path = tmp_path / "sample doc.pdf"
-    output_dir = tmp_path / "im-temp"
+def test_rasterize_page_returns_resized_pdf_page(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "sample.pdf"
     _make_test_pdf(pdf_path, page_sizes=((300, 120), (200, 200)))
 
-    work_item = _make_work_item(pdf_path, order_index=3, ordering_key="manual-key")
+    image = rasterize_page(pdf_path, max_edge_size=1540, page_number=1)
 
-    pages = rasterize_pdf_work_item(work_item=work_item, output_dir=output_dir)
-
-    assert output_dir.exists()
-    assert len(pages) == 2
-    assert tuple(page.page_index for page in pages) == (0, 1)
-    assert tuple(page.page_number for page in pages) == (1, 2)
-    assert tuple(page.total_pages for page in pages) == (2, 2)
-    assert tuple(page.source_order_index for page in pages) == (3, 3)
-    assert tuple(page.source_ordering_key for page in pages) == ("manual-key", "manual-key")
-    assert tuple(page.image_width for page in pages) == (600, 400)
-    assert tuple(page.image_height for page in pages) == (240, 400)
-    assert all(page.source_pdf_path == pdf_path for page in pages)
-    assert all(page.image_path.exists() for page in pages)
-    assert all(page.image_path.parent == output_dir for page in pages)
-    assert pages[0].image_path.name.endswith("-p0001.png")
-    assert pages[1].image_path.name.endswith("-p0002.png")
+    assert isinstance(image, Image.Image)
+    assert image.size == (300, 120)
+    image.close()
 
 
-def test_rasterize_pdf_missing_source_maps_to_missing_input(tmp_path: Path) -> None:
+def test_rasterize_page_returns_resized_image(tmp_path: Path) -> None:
+    image_path = tmp_path / "scan.png"
+    _make_test_image(image_path, (4000, 1000))
+
+    image = rasterize_page(image_path, max_edge_size=1540)
+
+    assert isinstance(image, Image.Image)
+    assert image.size == (1540, 385)
+    image.close()
+
+
+def test_rasterize_page_rejects_unsupported_file(tmp_path: Path) -> None:
+    txt_path = tmp_path / "notes.txt"
+    txt_path.write_text("not an image", encoding="utf-8")
+
+    with pytest.raises(RasterizationError) as exc_info:
+        rasterize_page(txt_path, max_edge_size=1540)
+
+    assert exc_info.value.error_code == "unsupported_file"
+    assert exc_info.value.source_path == txt_path
+
+
+def test_rasterize_page_rejects_missing_input(tmp_path: Path) -> None:
     missing_pdf = tmp_path / "missing.pdf"
-    work_item = _make_work_item(missing_pdf)
 
-    with pytest.raises(PdfRasterizationError) as exc_info:
-        rasterize_pdf_work_item(work_item=work_item, output_dir=tmp_path / "im-temp")
+    with pytest.raises(RasterizationError) as exc_info:
+        rasterize_page(missing_pdf, max_edge_size=1540)
 
     assert exc_info.value.error_code == "missing_input"
     assert exc_info.value.source_path == missing_pdf
@@ -165,7 +161,12 @@ def test_rasterize_pdf_missing_source_maps_to_missing_input(tmp_path: Path) -> N
         ("unknown open failure", "unreadable_pdf"),
     ),
 )
-def test_rasterize_pdf_open_failure_error_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, message: str, expected_code: str) -> None:
+def test_rasterize_page_pdf_open_failure_error_mapping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    expected_code: str,
+) -> None:
     pdf_path = tmp_path / "source.pdf"
     _make_test_pdf(pdf_path, page_sizes=((100, 100),))
 
@@ -175,14 +176,14 @@ def test_rasterize_pdf_open_failure_error_mapping(tmp_path: Path, monkeypatch: p
     monkeypatch.setattr(rasterizer.pdfium, "PdfiumError", _FakePdfiumError)
     monkeypatch.setattr(rasterizer.pdfium, "PdfDocument", _raise_on_open)
 
-    with pytest.raises(PdfRasterizationError) as exc_info:
-        rasterize_pdf_work_item(work_item=_make_work_item(pdf_path), output_dir=tmp_path / "im-temp")
+    with pytest.raises(RasterizationError) as exc_info:
+        rasterize_page(pdf_path, max_edge_size=1540)
 
     assert exc_info.value.error_code == expected_code
     assert exc_info.value.source_path == pdf_path
 
 
-def test_rasterize_pdf_render_failure_closes_page_and_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rasterize_page_render_failure_closes_page_and_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pdf_path = tmp_path / "source.pdf"
     _make_test_pdf(pdf_path, page_sizes=((100, 100),))
 
@@ -197,87 +198,49 @@ def test_rasterize_pdf_render_failure_closes_page_and_document(tmp_path: Path, m
     monkeypatch.setattr(rasterizer.pdfium, "PdfiumError", _FakePdfiumError)
     monkeypatch.setattr(rasterizer.pdfium, "PdfDocument", lambda _path: fake_document)
 
-    with pytest.raises(PdfRasterizationError) as exc_info:
-        rasterize_pdf_work_item(
-            work_item=_make_work_item(pdf_path),
-            output_dir=tmp_path / "im-temp",
-            render_scale=3.25,
-        )
+    with pytest.raises(RasterizationError) as exc_info:
+        rasterize_page(pdf_path, max_edge_size=1540)
 
     assert exc_info.value.error_code == "corrupted_pdf"
     assert close_log == ["page-0.close", "document.close"]
 
 
-def test_rasterize_pdf_work_item_zero_pages_returns_empty_and_closes_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rasterize_page_rejects_invalid_page_number(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pdf_path = tmp_path / "source.pdf"
     _make_test_pdf(pdf_path, page_sizes=((100, 100),))
 
     close_log: list[str] = []
     fake_document = _FakeDocument(pages=(), close_log=close_log)
-
     monkeypatch.setattr(rasterizer.pdfium, "PdfDocument", lambda _path: fake_document)
 
-    pages = rasterize_pdf_work_item(
-        work_item=_make_work_item(pdf_path),
-        output_dir=tmp_path / "im-temp",
-    )
+    with pytest.raises(RasterizationError) as exc_info:
+        rasterize_page(pdf_path, max_edge_size=1540, page_number=1)
 
-    assert pages == ()
+    assert exc_info.value.error_code == "unreadable_pdf"
     assert close_log == ["document.close"]
 
 
-def test_rasterize_pdf_work_item_forwards_render_scale_with_fake_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_pdf_page_count_returns_total_pages(tmp_path: Path) -> None:
     pdf_path = tmp_path / "source.pdf"
-    _make_test_pdf(pdf_path, page_sizes=((50, 40),))
+    _make_test_pdf(pdf_path, page_sizes=((100, 100), (200, 200), (300, 300)))
 
-    render_scales: list[float] = []
-    save_log: list[tuple[Path, str]] = []
-    close_log: list[str] = []
-    page = _FakePage(
-        size=(50, 40),
-        render_scales=render_scales,
-        save_log=save_log,
-        close_log=close_log,
-        page_name="page-0",
-    )
-    fake_document = _FakeDocument(pages=(page,), close_log=close_log)
-
-    monkeypatch.setattr(rasterizer.pdfium, "PdfDocument", lambda _path: fake_document)
-
-    pages = rasterize_pdf_work_item(
-        work_item=_make_work_item(pdf_path, order_index=9, ordering_key="ok"),
-        output_dir=tmp_path / "im-temp",
-        render_scale=4.5,
-    )
-
-    assert len(pages) == 1
-    assert render_scales == [4.5]
-    assert save_log[0][1] == "PNG"
-    assert close_log == ["page-0.close", "document.close"]
+    assert get_pdf_page_count(pdf_path) == 3
 
 
-def test_rasterize_pdf_work_items_filters_non_pdf_and_flattens_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    out_dir = tmp_path / "im-temp"
-    item_pdf_1 = _make_work_item(tmp_path / "a.pdf", source_type="pdf", order_index=1, ordering_key="a")
-    item_png = _make_work_item(tmp_path / "b.png", source_type="png", order_index=2, ordering_key="b")
-    item_pdf_2 = _make_work_item(tmp_path / "c.pdf", source_type="pdf", order_index=3, ordering_key="c")
+def test_get_pdf_page_count_rejects_missing_input(tmp_path: Path) -> None:
+    missing_pdf = tmp_path / "missing.pdf"
 
-    calls: list[tuple[str, Path, float]] = []
+    with pytest.raises(RasterizationError) as exc_info:
+        get_pdf_page_count(missing_pdf)
 
-    def _stub_rasterize(work_item: WorkItem, output_dir: Path, render_scale: float):
-        calls.append((work_item.source_path.name, output_dir, render_scale))
-        return (f"{work_item.source_path.stem}-p1",)
+    assert exc_info.value.error_code == "missing_input"
 
-    monkeypatch.setattr(rasterizer, "rasterize_pdf_work_item", _stub_rasterize)
 
-    pages = rasterize_pdf_work_items(
-        work_items=(item_pdf_1, item_png, item_pdf_2),
-        output_dir=out_dir,
-        render_scale=3.5,
-    )
+def test_get_pdf_page_count_rejects_non_pdf(tmp_path: Path) -> None:
+    image_path = tmp_path / "scan.png"
+    _make_test_image(image_path, (100, 100))
 
-    assert calls == [
-        ("a.pdf", out_dir, 3.5),
-        ("c.pdf", out_dir, 3.5),
-    ]
-    assert pages == ("a-p1", "c-p1")
+    with pytest.raises(RasterizationError) as exc_info:
+        get_pdf_page_count(image_path)
+
+    assert exc_info.value.error_code == "unsupported_file"
