@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from md_gen.config import AppConfig, ImageSettings, LlamaModelSettings, PathSettings, PromptSettings, RuntimeSettings
+from common.config import AppConfig, ImageSettings, LlamaModelSettings, PathSettings, PromptSettings, RuntimeSettings
 from md_gen.summarize import summarize_document, summarize_page
 
 

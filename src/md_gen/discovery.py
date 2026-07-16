@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .config import AppConfig
+from common.config import AppConfig
 
 _PDF_EXTENSIONS = {".pdf"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}

@@ -218,7 +218,14 @@ def build_config_from_args(args: SimpleNamespace) -> AppConfig:
 
     _paths = build_path_settings_from_args(args)
 
-    _prompts = build_prompt_settings_from_args(args, json_config.get("summary", {}))
+    md_gen_json = json_config.get("md_gen", {})
+    if not md_gen_json:
+        raise ConfigValidationError(
+            "md_gen_config_missing",
+            "Missing 'md_gen' section in settings.json file.",
+        )
+
+    _prompts = build_prompt_settings_from_args(args, md_gen_json.get("summary", {}))
 
     _ocr_args = SimpleNamespace(
         model_endpoint=args.ocr_model_endpoint,
@@ -236,7 +243,7 @@ def build_config_from_args(args: SimpleNamespace) -> AppConfig:
     )
     _language_model = build_llama_model_settings_from_args(_language_args, json_config.get("language_model", {}))
 
-    _image = build_image_settings_from_args(args, json_config.get("image", {}))
+    _image = build_image_settings_from_args(args, md_gen_json.get("image", {}))
 
     return AppConfig(
         paths = _paths,

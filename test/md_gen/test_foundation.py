@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from md_gen.config import build_config_from_args
+from common.config import build_config_from_args
 from md_gen.foundation import run_foundation_bootstrap
 
 
@@ -112,7 +112,7 @@ def test_run_foundation_returns_config_validation_error_code(tmp_path: Path) -> 
     config = build_config_from_args(_build_args(source_dir, output_dir))
 
     with patch("md_gen.foundation.build_work_items") as mock_build_work_items:
-        from md_gen.config import ConfigValidationError
+        from common.config import ConfigValidationError
         mock_build_work_items.side_effect = ConfigValidationError("invalid_source_directory", "missing")
         exit_code = run_foundation_bootstrap(config)
 

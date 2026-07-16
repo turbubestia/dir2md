@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from types import SimpleNamespace
 
-from .config import ConfigValidationError, build_config_from_args
-from .config_dump import format_config_dump
+from common.config import ConfigValidationError, build_config_from_args
+from common.config_dump import format_config_dump
 from .foundation import run_foundation_bootstrap
 
 def build_parser() -> argparse.ArgumentParser:

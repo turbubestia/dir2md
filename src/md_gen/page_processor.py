@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import AppConfig
+from common.config import AppConfig
 from .discovery import FileItem
 from . import ocr_processor, rasterizer, summarize
 
