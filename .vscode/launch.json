@@ -13,7 +13,7 @@
             "python": "${workspaceFolder}/.venv/bin/python"
         },
         {
-            "name": "Launch minimal ocr test",
+            "name": "Launch MD-GEN Sample Run",
             "type": "debugpy",
             "request": "launch",
             "module": "md_gen.cli",
@@ -21,6 +21,17 @@
                 "--source", "C:\\Users\\claud\\Development\\test\\source",
                 "--output", "C:\\Users\\claud\\Development\\test\\output",
                 "--overwrite"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Launch MD-MRG Sample Planner Run",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "md_mrg.cli",
+            "args": [
+                "--plan",
+                "--source", "C:\\Users\\claud\\Development\\test\\output"
             ],
             "console": "integratedTerminal"
         }
