@@ -25,7 +25,7 @@
     "md_mgr": {
         "rolling_window": 5,
         "score" : {
-            "prompt_path": "data/prompts/md_mgr_score_system_prompt.md"
+            "prompt_path": "data/prompts/md_mrg_score_system_prompt.md"
         }
     }
 }
