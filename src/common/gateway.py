@@ -257,7 +257,6 @@ class LlamaLanguageGateway(_BaseGateway):
     def __init__( self, endpoint_url: str, model_name: str, client: httpx.Client | None = None, ):
         super().__init__( endpoint_url, model_name, client )
         self._gateway_label = "language"
-        self.temperature = 0.8
 
     def build_text_request_messages(self, request: TextRequest) -> list[dict[str, Any]]:
         return [

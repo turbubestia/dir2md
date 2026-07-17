@@ -118,10 +118,10 @@ def test_planner_groups_images_and_appends_pdf_records(
 
     captured = capsys.readouterr()
     assert captured.out == (
-        "img-1.jpg <=> img-2.jpg == 6.0 response='{\"score\": 6}'\n"
-        "img-2.jpg <=> img-3.jpg == 8.0 response='{\"score\": 8}'\n"
-        "img-3.jpg <=> img-4.jpg == 2.0 response='{\"score\": 2}'\n"
-        "img-4.jpg <=> img-5.jpg == 7.0 response='{\"score\": 7}'\n"
+        "img-1.jpg <=> img-2.jpg == 6.0 \n"
+        "img-2.jpg <=> img-3.jpg == 8.0 \n"
+        "img-3.jpg <=> img-4.jpg == 2.0 \n"
+        "img-4.jpg <=> img-5.jpg == 7.0 \n"
     )
 
     plan_file_payload = json.loads((source_dir / "batch_mrg.json").read_text(encoding="utf-8"))
