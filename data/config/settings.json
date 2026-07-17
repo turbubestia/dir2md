@@ -22,8 +22,7 @@
             "token_threshold": 4096
         }
     },
-    "md_mgr": {
-        "rolling_window": 5,
+    "md_mrg": {
         "score" : {
             "prompt_path": "data/prompts/md_mrg_score_system_prompt.md"
         }

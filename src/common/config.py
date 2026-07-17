@@ -52,6 +52,20 @@ class RuntimeSettings:
 
 
 @dataclass(frozen=True)
+class MdMrgSettings:
+    score_prompt_path: Path
+    score_prompt_text: str
+
+
+@dataclass(frozen=True)
+class MdMrgConfig:
+    source_dir: Path
+    language_model: LlamaModelSettings
+    md_mrg: MdMrgSettings
+    runtime: RuntimeSettings
+
+
+@dataclass(frozen=True)
 class AppConfig:
     paths: PathSettings
     prompts: PromptSettings
@@ -210,6 +224,69 @@ def build_image_settings_from_args(args: SimpleNamespace, json_config: dict) -> 
     return ImageSettings(
         max_longest_edge_px=_max_longest_edge_px,
         token_threshold=_token_threshold,
+    )
+
+
+def build_md_mrg_settings_from_json(json_config: dict) -> MdMrgSettings:
+    md_mrg_json = json_config.get("md_mrg", {})
+    if not md_mrg_json:
+        raise ConfigValidationError(
+            "md_mrg_config_missing",
+            "Missing 'md_mrg' section in settings.json file.",
+        )
+
+    score_json = md_mrg_json.get("score", {})
+    prompt_path_raw = score_json.get("prompt_path")
+    if not prompt_path_raw:
+        raise ConfigValidationError(
+            "md_mrg_score_prompt_missing",
+            "Missing 'md_mrg.score.prompt_path' in settings.json file.",
+        )
+
+    prompt_path = Path(prompt_path_raw).expanduser().resolve()
+    try:
+        score_prompt_text = prompt_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigValidationError(
+            "md_mrg_score_prompt_read_failed",
+            f"Failed to read md_mrg score prompt file at: {prompt_path}",
+        ) from exc
+
+    if not score_prompt_text.strip():
+        raise ConfigValidationError(
+            "md_mrg_score_prompt_empty",
+            f"md_mrg score prompt file is empty: {prompt_path}",
+        )
+
+    return MdMrgSettings(
+        score_prompt_path=prompt_path,
+        score_prompt_text=score_prompt_text,
+    )
+
+
+def build_md_mrg_config_from_args(args: SimpleNamespace) -> MdMrgConfig:
+    json_config = read_json_settings_file()
+
+    source_dir = _resolve_required_directory(args.source)
+
+    _language_args = SimpleNamespace(
+        model_endpoint=getattr(args, "language_model_endpoint", None),
+        model_name=getattr(args, "language_model_name", None),
+        timeout_seconds=getattr(args, "language_timeout_seconds", None),
+        max_retries=getattr(args, "language_max_retries", None),
+    )
+    language_model = build_llama_model_settings_from_args(_language_args, json_config.get("language_model", {}))
+
+    md_mrg_settings = build_md_mrg_settings_from_json(json_config)
+
+    return MdMrgConfig(
+        source_dir=source_dir,
+        language_model=language_model,
+        md_mrg=md_mrg_settings,
+        runtime=RuntimeSettings(
+            dry_run=False,
+            overwrite=getattr(args, "overwrite", False),
+        ),
     )
 
 def build_config_from_args(args: SimpleNamespace) -> AppConfig:

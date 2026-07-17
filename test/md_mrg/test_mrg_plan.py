@@ -1,217 +1,196 @@
 import json
-from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
-from PIL import Image
+import pytest
 
-from md_mrg.apply import ApplyError, apply_merge_plan
-from md_mrg.cli import DEFAULT_SCORE_PROMPT_FILE, _build_parser, main
-from md_mrg.io import derive_metadata_dir, derive_plan_file
-from md_mrg.models import PlanConfig
-from md_mrg.planner import build_merge_plan, load_score_system_prompt
-import md_mrg.scorers as scorers
-
-
-def _write_document_metadata(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+from common.config import LlamaModelSettings, MdMrgConfig, MdMrgSettings, RuntimeSettings
+from common.gateway import TextResponse
+from md_mrg.cli import build_parser
+from md_mrg import planner as planner_mod
 
 
-def _verified_doc_payload() -> dict:
+def _doc(name: str, file_type: str = "image") -> dict:
     return {
-        "document_id": "doc-verified",
-        "source_name": "invoice.pdf",
-        "total_pages": 1,
-        "is_verified_sequence": True,
-        "fragments": [
-            {
-                "sequence_number": 1,
-                "image_file": "page-1.png",
-                "markdown_file": "page-1.md",
-                "anchors": {
-                    "first_line": "invoice",
-                    "last_line": "total",
-                },
-                "content_fingerprint": {
-                    "snippet": "invoice summary",
-                    "detected_entities": [],
-                },
-            }
-        ],
+        "source_file_name": name,
+        "file_type": file_type,
+        "page_count": 1,
+        "date_of_process": "2026-07-14T08:21:54.244888+00:00",
+        "summary": "summary",
+        "markdown_file": f"{Path(name).stem}.md",
+        "status": "ok",
     }
 
 
-def _base_plan_config(source_root: Path) -> PlanConfig:
-    return PlanConfig(
-        source_root=source_root,
-        temp_root=source_root / "temp",
-        metadata_dir=source_root / "temp" / "metadata",
-        markdown_dir=source_root / "temp" / "markdown",
-        image_dir=source_root / "temp" / "images",
-        plan_file=source_root / "merge-plan.json",
-        edge_scorer="llm",
-        rolling_window=5,
-        llm_endpoint_url="http://localhost:8081/v1/chat/completions",
-        llm_model_name="qwen3-1.7b",
-        llm_timeout_seconds=120.0,
-        llm_max_retries=0,
-        score_prompt_override_path=None,
-        score_prompt_default_path=DEFAULT_SCORE_PROMPT_FILE,
-        score_prompt_builtin_text="builtin score prompt",
-        overwrite=True,
+def _cfg(source_dir: Path) -> MdMrgConfig:
+    return MdMrgConfig(
+        source_dir=source_dir,
+        language_model=LlamaModelSettings(
+            endpoint_url="http://localhost:8081/v1/chat/completions",
+            model_name="qwen3-1.7b",
+            request_timeout_seconds=30.0,
+            request_max_retries=0,
+        ),
+        md_mrg=MdMrgSettings(
+            score_prompt_path=source_dir / "score_prompt.md",
+            score_prompt_text="Return JSON with score key.",
+        ),
+        runtime=RuntimeSettings(dry_run=False, overwrite=False),
     )
 
 
-def test_plan_cli_rejects_non_llm_edge_scorer() -> None:
-    parser = _build_parser()
-    try:
-        parser.parse_args(["plan", "--source", "/tmp", "--edge-scorer", "heuristic"])
-    except SystemExit as exc:
-        assert exc.code == 2
-    else:
-        raise AssertionError("Expected parser failure for non-llm edge scorer")
+def _write_batch(source_dir: Path, docs: list[dict]) -> None:
+    (source_dir / "batch.json").write_text(json.dumps({"documents": docs}, indent=2), encoding="utf-8")
 
 
-def test_mrg_plan_builds_deterministic_plan_in_source_root(tmp_path: Path, monkeypatch) -> None:
-    source_root = tmp_path / "output"
-    metadata_dir = derive_metadata_dir(source_root)
-    metadata_dir.mkdir(parents=True)
-
-    _write_document_metadata(metadata_dir / "verified.json", _verified_doc_payload())
-
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "md-mrg",
-            "plan",
-            "--source",
-            str(source_root),
-            "--edge-scorer",
-            "llm",
-            "--overwrite",
-        ],
-    )
-
-    exit_code = main()
-    assert exit_code == 0
-
-    plan_file = derive_plan_file(source_root)
-    assert plan_file.exists()
-    payload = json.loads(plan_file.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "2.0"
-    assert payload["scorer_mode"] == "llm"
-    assert payload["metadata_dir"] == str(metadata_dir)
+def _write_markdowns(source_dir: Path, docs: list[dict]) -> None:
+    for doc in docs:
+        markdown_file = doc.get("markdown_file")
+        if markdown_file:
+            (source_dir / markdown_file).write_text(f"content-{markdown_file}", encoding="utf-8")
 
 
-def test_mrg_apply_uses_source_root_paths(tmp_path: Path) -> None:
-    source_root = tmp_path / "output"
-    markdown_dir = source_root / "temp" / "markdown"
-    image_dir = source_root / "temp" / "images"
-    markdown_dir.mkdir(parents=True)
-    image_dir.mkdir(parents=True)
+def test_cli_requires_exactly_one_mode() -> None:
+    parser = build_parser()
 
-    (markdown_dir / "a.md").write_text("Page A", encoding="utf-8")
-    (markdown_dir / "b.md").write_text("Page B", encoding="utf-8")
-    Image.new("RGB", (200, 300), color=(255, 255, 255)).save(image_dir / "a.jpg")
-    Image.new("RGB", (200, 300), color=(255, 255, 255)).save(image_dir / "b.jpg")
+    with pytest.raises(SystemExit) as missing_mode:
+        parser.parse_args(["--source", "./out"])
+    assert missing_mode.value.code == 2
 
-    plan_file = derive_plan_file(source_root)
-    plan_file.write_text(
-        json.dumps(
-            {
-                "batch_id": "batch-1",
-                "generated_at_utc": "2026-07-07T00:00:00+00:00",
-                "documents": [
-                    {
-                        "document_id": "doc-1",
-                        "source_name": "scan.jpg",
-                        "total_pages": 2,
-                        "is_verified_sequence": True,
-                        "fragments": [
-                            {
-                                "sequence_number": 1,
-                                "image_file": "a.jpg",
-                                "markdown_file": "a.md",
-                                "content_fingerprint": {"snippet": "invoice july 1", "detected_entities": []},
-                            },
-                            {
-                                "sequence_number": 2,
-                                "image_file": "b.jpg",
-                                "markdown_file": "b.md",
-                                "content_fingerprint": {"snippet": "invoice july 2", "detected_entities": []},
-                            },
-                        ],
-                    }
-                ],
-            },
-            ensure_ascii=True,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    exit_code = apply_merge_plan(source_root=source_root, overwrite=True)
-    assert exit_code == 0
-
-    merged_markdown_files = list(source_root.glob("*.md"))
-    assert len(merged_markdown_files) == 1
-    content = merged_markdown_files[0].read_text(encoding="utf-8")
-    assert "Page A" in content
-    assert "\n\n---\n\n" in content
-    assert "Page B" in content
-    assert len(tuple(source_root.glob("*.pdf"))) == 1
+    with pytest.raises(SystemExit) as both_modes:
+        parser.parse_args(["--source", "./out", "--plan", "--apply"])
+    assert both_modes.value.code == 2
 
 
-def test_apply_returns_coded_error_when_plan_missing(tmp_path: Path) -> None:
-    source_root = tmp_path / "output"
-    source_root.mkdir()
-    (source_root / "temp" / "markdown").mkdir(parents=True)
-    (source_root / "temp" / "images").mkdir(parents=True)
+def test_planner_groups_images_and_appends_pdf_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
 
-    try:
-        apply_merge_plan(source_root=source_root)
-    except ApplyError as exc:
-        assert exc.error_code == "plan_file_not_found"
-    else:
-        raise AssertionError("Expected ApplyError for missing deterministic plan file")
+    images = [_doc(f"img-{n}.jpg") for n in range(1, 6)]
+    pdfs = [_doc("booklet.pdf", file_type="pdf"), _doc("report.pdf", file_type="pdf")]
+    all_docs = images + pdfs
+
+    _write_batch(source_dir, all_docs)
+    _write_markdowns(source_dir, all_docs)
+
+    scores = iter(["{\"score\": 6}", "{\"score\": 8}", "{\"score\": 2}", "{\"score\": 7}"])
+
+    class FakeGateway:
+        def __init__(self, endpoint_url: str, model_name: str):
+            self.endpoint_url = endpoint_url
+            self.model_name = model_name
+            self.request_timeout_seconds = 0.0
+            self.request_max_retries = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def send_text_request(self, request):
+            return TextResponse(model_name=self.model_name, text=next(scores), raw_response={})
+
+    monkeypatch.setattr(planner_mod, "LlamaLanguageGateway", FakeGateway)
+
+    out = planner_mod.run_plan(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    documents = out["documents"]
+    assert len(documents) == 4
+    assert documents[0]["documents"] == [images[0], images[1], images[2]]
+    assert documents[1]["documents"] == [images[3], images[4]]
+    assert documents[2] == pdfs[0]
+    assert documents[3] == pdfs[1]
+
+    plan_file_payload = json.loads((source_dir / "batch_mrg.json").read_text(encoding="utf-8"))
+    assert plan_file_payload == out
 
 
-def test_load_score_prompt_uses_override_default_builtin(tmp_path: Path) -> None:
-    source_root = tmp_path / "output"
-    config = _base_plan_config(source_root)
+def test_planner_reorders_group_when_score_is_negative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
 
-    override_file = tmp_path / "override.txt"
-    override_file.write_text("override prompt", encoding="utf-8")
-    override_config = replace(config, score_prompt_override_path=override_file)
-    assert load_score_system_prompt(override_config) == "override prompt"
+    images = [_doc(f"img-{n}.jpg") for n in range(1, 5)]
+    _write_batch(source_dir, images)
+    _write_markdowns(source_dir, images)
 
-    default_file = tmp_path / "default.txt"
-    default_file.write_text("default prompt", encoding="utf-8")
-    default_config = replace(
-        config,
-        score_prompt_override_path=tmp_path / "missing.txt",
-        score_prompt_default_path=default_file,
-    )
-    assert load_score_system_prompt(default_config) == "default prompt"
+    scores = iter(["{\"score\": 6}", "{\"score\": -6}", "{\"score\": 8}"])
 
-    default_file.write_text("", encoding="utf-8")
-    assert load_score_system_prompt(default_config) == "builtin score prompt"
+    class FakeGateway:
+        def __init__(self, endpoint_url: str, model_name: str):
+            self.request_timeout_seconds = 0.0
+            self.request_max_retries = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def send_text_request(self, request):
+            return TextResponse(model_name="m", text=next(scores), raw_response={})
+
+    monkeypatch.setattr(planner_mod, "LlamaLanguageGateway", FakeGateway)
+
+    out = planner_mod.run_plan(source_dir=source_dir, cfg=_cfg(source_dir))
+    documents = out["documents"]
+
+    assert len(documents) == 1
+    assert documents[0]["documents"] == [images[0], images[2], images[1], images[3]]
 
 
-def test_heuristic_scorer_is_removed() -> None:
-    assert hasattr(scorers, "LlmEdgeScorer")
-    assert hasattr(scorers, "HeuristicEdgeScorer") is False
+def test_planner_splits_group_on_score_parse_failure_and_continues(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+
+    images = [_doc(f"img-{n}.jpg") for n in range(1, 4)]
+    _write_batch(source_dir, images)
+    _write_markdowns(source_dir, images)
+
+    scores = iter(["not-json", "{\"score\": 7}"])
+
+    class FakeGateway:
+        def __init__(self, endpoint_url: str, model_name: str):
+            self.request_timeout_seconds = 0.0
+            self.request_max_retries = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def send_text_request(self, request):
+            return TextResponse(model_name="m", text=next(scores), raw_response={})
+
+    monkeypatch.setattr(planner_mod, "LlamaLanguageGateway", FakeGateway)
+
+    out = planner_mod.run_plan(source_dir=source_dir, cfg=_cfg(source_dir))
+    documents = out["documents"]
+
+    assert len(documents) == 2
+    assert documents[0]["documents"] == [images[0]]
+    assert documents[1]["documents"] == [images[1], images[2]]
 
 
-def test_build_merge_plan_writes_same_deterministic_filename(tmp_path: Path) -> None:
-    source_root = tmp_path / "output"
-    metadata_dir = derive_metadata_dir(source_root)
-    metadata_dir.mkdir(parents=True)
-    _write_document_metadata(metadata_dir / "verified.json", _verified_doc_payload())
+def test_cli_main_dispatches_plan_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
 
-    config = _base_plan_config(source_root)
-    first = build_merge_plan(config)
-    second = build_merge_plan(config)
+    called = {"plan": False}
 
-    assert first.output_path == second.output_path
-    assert first.output_path.name == "merge-plan.json"
+    def fake_build_cfg(args: SimpleNamespace) -> MdMrgConfig:
+        return _cfg(source_dir)
+
+    def fake_run_plan(source_dir: Path, cfg: MdMrgConfig) -> dict:
+        called["plan"] = True
+        return {"documents": []}
+
+    monkeypatch.setattr("md_mrg.cli.build_md_mrg_config_from_args", fake_build_cfg)
+    monkeypatch.setattr("md_mrg.cli.run_plan", fake_run_plan)
+    monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--plan"])
+
+    from md_mrg.cli import main
+
+    assert main() == 0
+    assert called["plan"] is True

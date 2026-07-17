@@ -376,3 +376,97 @@ def test_build_config_from_args_rejects_invalid_source(monkeypatch: pytest.Monke
 
 	assert exc_info.value.error_code == "invalid_source_directory"
 
+
+def test_build_md_mrg_settings_from_json_reads_prompt(tmp_path: Path) -> None:
+	prompt_file = tmp_path / "score-prompt.txt"
+	prompt_file.write_text("score prompt", encoding="utf-8")
+
+	settings = config.build_md_mrg_settings_from_json(
+		{
+			"md_mrg": {
+				"score": {
+					"prompt_path": str(prompt_file),
+				}
+			}
+		}
+	)
+
+	assert settings.score_prompt_path == prompt_file.resolve()
+	assert settings.score_prompt_text == "score prompt"
+
+
+@pytest.mark.parametrize(
+	("json_payload", "expected_code"),
+	[
+		({}, "md_mrg_config_missing"),
+		({"md_mrg": {}}, "md_mrg_config_missing"),
+		({"md_mrg": {"score": {}}}, "md_mrg_score_prompt_missing"),
+	],
+)
+def test_build_md_mrg_settings_from_json_validates_required_keys(json_payload: dict, expected_code: str) -> None:
+	with pytest.raises(config.ConfigValidationError) as exc_info:
+		config.build_md_mrg_settings_from_json(json_payload)
+
+	assert exc_info.value.error_code == expected_code
+
+
+def test_build_md_mrg_settings_from_json_rejects_empty_prompt(tmp_path: Path) -> None:
+	prompt_file = tmp_path / "empty-prompt.txt"
+	prompt_file.write_text("   ", encoding="utf-8")
+
+	with pytest.raises(config.ConfigValidationError) as exc_info:
+		config.build_md_mrg_settings_from_json(
+			{
+				"md_mrg": {
+					"score": {
+						"prompt_path": str(prompt_file),
+					}
+				}
+			}
+		)
+
+	assert exc_info.value.error_code == "md_mrg_score_prompt_empty"
+
+
+def test_build_md_mrg_config_from_args_assembles_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+	source_dir = tmp_path / "source"
+	source_dir.mkdir()
+	prompt_file = tmp_path / "score-prompt.txt"
+	prompt_file.write_text("score prompt", encoding="utf-8")
+
+	monkeypatch.setattr(
+		config,
+		"read_json_settings_file",
+		lambda: {
+			"language_model": {
+				"endpoint": "http://language-endpoint",
+				"model": "language-model",
+				"timeout_seconds": 44.0,
+				"max_retries": 5,
+			},
+			"md_mrg": {
+				"score": {
+					"prompt_path": str(prompt_file),
+				}
+			},
+		},
+	)
+
+	args = Namespace(
+		source=str(source_dir),
+		language_model_endpoint=None,
+		language_model_name=None,
+		language_timeout_seconds=None,
+		language_max_retries=None,
+	)
+
+	md_mrg_config = config.build_md_mrg_config_from_args(args)
+
+	assert md_mrg_config.source_dir == source_dir.resolve()
+	assert md_mrg_config.language_model.endpoint_url == "http://language-endpoint"
+	assert md_mrg_config.language_model.model_name == "language-model"
+	assert md_mrg_config.language_model.request_timeout_seconds == 44.0
+	assert md_mrg_config.language_model.request_max_retries == 5
+	assert md_mrg_config.md_mrg.score_prompt_path == prompt_file.resolve()
+	assert md_mrg_config.md_mrg.score_prompt_text == "score prompt"
+
