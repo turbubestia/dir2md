@@ -4,6 +4,8 @@ from common.config import (
     AppConfig,
     ImageSettings,
     LlamaModelSettings,
+    MdGenSettings,
+    MdMrgSettings,
     PathSettings,
     PromptSettings,
     RuntimeSettings,
@@ -17,11 +19,13 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
         paths=PathSettings(
             source_dir=Path("C:/docs/source"),
             output_dir=Path("C:/docs/output"),
-            temp_dir=Path("C:/docs/output/temp"),
         ),
-        prompts=PromptSettings(
-            summary_prompt_path=Path("C:/docs/prompts/summary.md"),
-            summary_prompt_text="first line\nsecond line\nthird line",
+        md_gen=MdGenSettings(
+            prompts=PromptSettings(
+                summary_prompt_path=Path("C:/docs/prompts/summary.md"),
+                summary_prompt_text="first line\nsecond line\nthird line",
+            ),
+            image=ImageSettings(max_longest_edge_px=1540, token_threshold=16000),
         ),
         ocr_model=LlamaModelSettings(
             endpoint_url="http://localhost:11434",
@@ -35,9 +39,11 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
             request_timeout_seconds=90.0,
             request_max_retries=4,
         ),
-        image=ImageSettings(
-            max_longest_edge_px=1540,
-            token_threshold=16000,
+        md_mrg=MdMrgSettings(
+            score=PromptSettings(
+                summary_prompt_path=Path("C:/docs/prompts/score.md"),
+                summary_prompt_text="score prompt",
+            ),
         ),
         runtime=RuntimeSettings(
             dry_run=True,
@@ -51,9 +57,8 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
     assert "[paths]" in rendered
     assert "source_dir=C:\\docs\\source" in rendered
     assert "output_dir=C:\\docs\\output" in rendered
-    assert "temp_dir=C:\\docs\\output\\temp" in rendered
 
-    assert "[prompts]" in rendered
+    assert "[md_gen.prompts]" in rendered
     assert "summary_prompt_path=C:\\docs\\prompts\\summary.md" in rendered
     assert "summary_prompt_text:" in rendered
 
@@ -69,7 +74,7 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
     assert "request_timeout_seconds=90.0" in rendered
     assert "request_max_retries=4" in rendered
 
-    assert "[image]" in rendered
+    assert "[md_gen.image]" in rendered
     assert "max_longest_edge_px=1540" in rendered
     assert "token_threshold=16000" in rendered
 
@@ -85,11 +90,13 @@ def test_format_config_dump_preserves_multiline_prompt_text_verbatim() -> None:
         paths=PathSettings(
             source_dir=Path("C:/source"),
             output_dir=Path("C:/output"),
-            temp_dir=Path("C:/output/temp"),
         ),
-        prompts=PromptSettings(
-            summary_prompt_path=None,
-            summary_prompt_text=prompt_text,
+        md_gen=MdGenSettings(
+            prompts=PromptSettings(
+                summary_prompt_path=None,
+                summary_prompt_text=prompt_text,
+            ),
+            image=ImageSettings(max_longest_edge_px=1200, token_threshold=14000),
         ),
         ocr_model=LlamaModelSettings(
             endpoint_url="http://ocr",
@@ -103,9 +110,11 @@ def test_format_config_dump_preserves_multiline_prompt_text_verbatim() -> None:
             request_timeout_seconds=15.0,
             request_max_retries=2,
         ),
-        image=ImageSettings(
-            max_longest_edge_px=1200,
-            token_threshold=14000,
+        md_mrg=MdMrgSettings(
+            score=PromptSettings(
+                summary_prompt_path=Path("C:/score.md"),
+                summary_prompt_text="score prompt",
+            ),
         ),
         runtime=RuntimeSettings(
             dry_run=False,

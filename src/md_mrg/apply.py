@@ -6,7 +6,7 @@ from typing import Any
 
 from PIL import Image
 
-from common.config import MdMrgConfig
+from common.config import AppConfig
 
 MERGE_PLAN_FILE_NAME = "batch_mrg.json"
 MERGE_RESULT_FILE_NAME = "batch_mrg_result.json"
@@ -107,7 +107,7 @@ def _is_group_item(item: dict[str, Any]) -> bool:
     return isinstance(item.get("documents"), list)
 
 
-def run_apply(source_dir: Path, cfg: MdMrgConfig) -> dict[str, Any]:
+def run_apply(source_dir: Path, cfg: AppConfig) -> dict[str, Any]:
     del cfg
 
     plan_path = source_dir / MERGE_PLAN_FILE_NAME

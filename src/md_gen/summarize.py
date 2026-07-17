@@ -14,7 +14,7 @@ def summarize_page(config: AppConfig, page_markdown: str) -> str:
     ) as gateway:
         response = gateway.send_text_request(
             TextRequest(
-                system_prompt=config.prompts.summary_prompt_text,
+                system_prompt=config.md_gen.prompts.summary_prompt_text,
                 user_prompt=page_markdown,
             )
         )

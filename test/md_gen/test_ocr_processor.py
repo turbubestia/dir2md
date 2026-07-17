@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from common.config import AppConfig, ImageSettings, LlamaModelSettings, PathSettings, PromptSettings, RuntimeSettings
+from common.config import AppConfig, ImageSettings, LlamaModelSettings, MdGenSettings, MdMrgSettings, PathSettings, PromptSettings, RuntimeSettings
 from md_gen.ocr_processor import extract_markdown
 
 
@@ -13,9 +13,11 @@ def _make_config() -> AppConfig:
         paths=PathSettings(
             source_dir=Path("/in"),
             output_dir=Path("/out"),
-            temp_dir=Path("/out/temp"),
         ),
-        prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summarize"),
+        md_gen=MdGenSettings(
+            prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summarize"),
+            image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096),
+        ),
         ocr_model=LlamaModelSettings(
             endpoint_url="http://127.0.0.1:8080/v1",
             model_name="lightonocr-2",
@@ -28,7 +30,7 @@ def _make_config() -> AppConfig:
             request_timeout_seconds=120.0,
             request_max_retries=2,
         ),
-        image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096),
+        md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=Path("/score"), summary_prompt_text="score")),
         runtime=RuntimeSettings(dry_run=False, overwrite=False),
     )
 

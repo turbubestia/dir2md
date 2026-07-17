@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from common.config import LlamaModelSettings, MdMrgConfig, MdMrgSettings, RuntimeSettings
+from common.config import AppConfig, ImageSettings, LlamaModelSettings, MdGenSettings, MdMrgSettings, PathSettings, PromptSettings, RuntimeSettings
 from common.gateway import TextResponse
 from md_mrg.cli import build_parser
 from md_mrg import planner as planner_mod
@@ -22,18 +22,30 @@ def _doc(name: str, file_type: str = "image") -> dict:
     }
 
 
-def _cfg(source_dir: Path) -> MdMrgConfig:
-    return MdMrgConfig(
-        source_dir=source_dir,
+def _cfg(source_dir: Path) -> AppConfig:
+    return AppConfig(
+        paths=PathSettings(source_dir=source_dir, output_dir=source_dir),
+        ocr_model=LlamaModelSettings(
+            endpoint_url="http://localhost:8080/v1/chat/completions",
+            model_name="ocr-model",
+            request_timeout_seconds=30.0,
+            request_max_retries=0,
+        ),
         language_model=LlamaModelSettings(
             endpoint_url="http://localhost:8081/v1/chat/completions",
             model_name="qwen3-1.7b",
             request_timeout_seconds=30.0,
             request_max_retries=0,
         ),
+        md_gen=MdGenSettings(
+            prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"),
+            image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096),
+        ),
         md_mrg=MdMrgSettings(
-            score_prompt_path=source_dir / "score_prompt.md",
-            score_prompt_text="Return JSON with score key.",
+            score=PromptSettings(
+                summary_prompt_path=source_dir / "score_prompt.md",
+                summary_prompt_text="Return JSON with score key.",
+            ),
         ),
         runtime=RuntimeSettings(dry_run=False, overwrite=False),
     )
@@ -62,7 +74,9 @@ def test_cli_requires_exactly_one_mode() -> None:
     assert both_modes.value.code == 2
 
 
-def test_planner_groups_images_and_appends_pdf_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_planner_groups_images_and_appends_pdf_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     source_dir = tmp_path / "out"
     source_dir.mkdir()
 
@@ -101,6 +115,14 @@ def test_planner_groups_images_and_appends_pdf_records(tmp_path: Path, monkeypat
     assert documents[1]["documents"] == [images[3], images[4]]
     assert documents[2] == pdfs[0]
     assert documents[3] == pdfs[1]
+
+    captured = capsys.readouterr()
+    assert captured.out == (
+        "img-1.jpg <=> img-2.jpg == 6.0 response='{\"score\": 6}'\n"
+        "img-2.jpg <=> img-3.jpg == 8.0 response='{\"score\": 8}'\n"
+        "img-3.jpg <=> img-4.jpg == 2.0 response='{\"score\": 2}'\n"
+        "img-4.jpg <=> img-5.jpg == 7.0 response='{\"score\": 7}'\n"
+    )
 
     plan_file_payload = json.loads((source_dir / "batch_mrg.json").read_text(encoding="utf-8"))
     assert plan_file_payload == out
@@ -179,10 +201,10 @@ def test_cli_main_dispatches_plan_mode(tmp_path: Path, monkeypatch: pytest.Monke
 
     called = {"plan": False}
 
-    def fake_build_cfg(args: SimpleNamespace) -> MdMrgConfig:
+    def fake_build_cfg(args: SimpleNamespace) -> AppConfig:
         return _cfg(source_dir)
 
-    def fake_run_plan(source_dir: Path, cfg: MdMrgConfig) -> dict:
+    def fake_run_plan(source_dir: Path, cfg: AppConfig) -> dict:
         called["plan"] = True
         return {"documents": []}
 

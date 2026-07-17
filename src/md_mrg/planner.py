@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from common.config import MdMrgConfig
+from common.config import AppConfig
 from common.gateway import GatewayError, LlamaLanguageGateway, TextRequest
 
 BATCH_FILE_NAME = "batch.json"
@@ -24,6 +24,7 @@ class ScoreOutcome:
     score: float | None
     error_code: str | None = None
     detail: str | None = None
+    response_text: str | None = None
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -88,9 +89,13 @@ def _parse_score_response(response_text: str) -> float:
     if not isinstance(payload, dict):
         raise PlannerError("score_parse_failed", "Score response must be a JSON object")
 
-    score = payload.get("score")
+    score_key = "bridge_score" if "bridge_score" in payload else "score"
+    score = payload.get(score_key)
     if not isinstance(score, (int, float)):
-        raise PlannerError("score_parse_failed", "Score response must contain numeric 'score'")
+        raise PlannerError(
+            "score_parse_failed",
+            f"Score response must contain numeric '{score_key}'",
+        )
 
     return float(score)
 
@@ -102,6 +107,7 @@ def _score_pair(
     page_a: dict[str, Any],
     page_b: dict[str, Any],
 ) -> ScoreOutcome:
+    response_text: str | None = None
     try:
         page_a_text = _load_markdown(source_dir, page_a)
         page_b_text = _load_markdown(source_dir, page_b)
@@ -111,10 +117,16 @@ def _score_pair(
             user_prompt=_build_score_user_prompt(page_a_text=page_a_text, page_b_text=page_b_text),
         )
         response = gateway.send_text_request(request)
+        response_text = response.text
         score = _parse_score_response(response.text)
-        return ScoreOutcome(score=score)
+        return ScoreOutcome(score=score, response_text=response.text)
     except PlannerError as exc:
-        return ScoreOutcome(score=None, error_code=exc.error_code, detail=str(exc))
+        return ScoreOutcome(
+            score=None,
+            error_code=exc.error_code,
+            detail=str(exc),
+            response_text=response_text,
+        )
     except GatewayError as exc:
         return ScoreOutcome(score=None, error_code=exc.error_code, detail=str(exc))
 
@@ -155,6 +167,12 @@ def _build_groups(
         page_a = image_documents[left_index]
         page_b = image_documents[right_index]
         score_outcome = _score_pair(source_dir, gateway, score_prompt, page_a, page_b)
+        file_name_a = page_a.get("source_file_name", page_a.get("markdown_file", "<unknown>"))
+        file_name_b = page_b.get("source_file_name", page_b.get("markdown_file", "<unknown>"))
+        print(
+            f"{file_name_a} <=> {file_name_b} == {score_outcome.score} "
+            # f"response={score_outcome.response_text!r}"
+        )
 
         if score_outcome.score is None or abs(score_outcome.score) < SCORE_THRESHOLD:
             groups.append(current_group)
@@ -185,7 +203,7 @@ def _build_groups(
     return [_as_group(group) for group in groups]
 
 
-def run_plan(source_dir: Path, cfg: MdMrgConfig) -> dict[str, Any]:
+def run_plan(source_dir: Path, cfg: AppConfig) -> dict[str, Any]:
     batch_path = source_dir / BATCH_FILE_NAME
     plan_path = source_dir / MERGE_PLAN_FILE_NAME
 
@@ -205,7 +223,7 @@ def run_plan(source_dir: Path, cfg: MdMrgConfig) -> dict[str, Any]:
         groups = _build_groups(
             source_dir=source_dir,
             gateway=gateway,
-            score_prompt=cfg.md_mrg.score_prompt_text,
+            score_prompt=cfg.md_mrg.score.summary_prompt_text,
             image_documents=image_documents,
         )
 

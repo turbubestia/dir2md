@@ -154,7 +154,6 @@ def test_build_path_settings_from_args(tmp_path: Path) -> None:
 
 	assert path_settings.source_dir == source_dir.resolve()
 	assert path_settings.output_dir == output_dir.resolve()
-	assert path_settings.temp_dir == output_dir.resolve() / "temp"
 
 
 @pytest.mark.parametrize(
@@ -320,6 +319,8 @@ def test_build_config_from_args_assembles_full_config(monkeypatch: pytest.Monkey
 	output_dir = tmp_path / "output"
 	prompt_file = tmp_path / "summary-prompt.txt"
 	prompt_file.write_text("summary prompt text", encoding="utf-8")
+	score_prompt_file = tmp_path / "score-prompt.txt"
+	score_prompt_file.write_text("score prompt text", encoding="utf-8")
 
 	monkeypatch.setattr(
 		config,
@@ -338,7 +339,8 @@ def test_build_config_from_args_assembles_full_config(monkeypatch: pytest.Monkey
 			"md_gen": {
 				"summary": {"prompt_path": str(prompt_file)},
 				"image": {"max_longest_edge_px": 900, "token_threshold": 7777},
-			}
+			},
+			"md_mrg": {"score": {"prompt_path": str(score_prompt_file)}},
 		},
 	)
 	args = make_args(source_dir, output_dir, dry_run=True, overwrite=True)
@@ -347,9 +349,8 @@ def test_build_config_from_args_assembles_full_config(monkeypatch: pytest.Monkey
 
 	assert app_config.paths.source_dir == source_dir.resolve()
 	assert app_config.paths.output_dir == output_dir.resolve()
-	assert app_config.paths.temp_dir == output_dir.resolve() / "temp"
-	assert app_config.prompts.summary_prompt_path == str(prompt_file.resolve())
-	assert app_config.prompts.summary_prompt_text == "summary prompt text"
+	assert app_config.md_gen.prompts.summary_prompt_path == str(prompt_file.resolve())
+	assert app_config.md_gen.prompts.summary_prompt_text == "summary prompt text"
 	assert app_config.ocr_model.endpoint_url == "http://ocr-endpoint"
 	assert app_config.ocr_model.model_name == "ocr-model"
 	assert app_config.ocr_model.request_timeout_seconds == 120.0
@@ -358,8 +359,8 @@ def test_build_config_from_args_assembles_full_config(monkeypatch: pytest.Monkey
 	assert app_config.language_model.model_name == "language-model"
 	assert app_config.language_model.request_timeout_seconds == 44.0
 	assert app_config.language_model.request_max_retries == 5
-	assert app_config.image.max_longest_edge_px == 900
-	assert app_config.image.token_threshold == 7777
+	assert app_config.md_gen.image.max_longest_edge_px == 900
+	assert app_config.md_gen.image.token_threshold == 7777
 	assert app_config.runtime.dry_run is True
 	assert app_config.runtime.overwrite is True
 
@@ -391,8 +392,8 @@ def test_build_md_mrg_settings_from_json_reads_prompt(tmp_path: Path) -> None:
 		}
 	)
 
-	assert settings.score_prompt_path == prompt_file.resolve()
-	assert settings.score_prompt_text == "score prompt"
+	assert settings.score.summary_prompt_path == prompt_file.resolve()
+	assert settings.score.summary_prompt_text == "score prompt"
 
 
 @pytest.mark.parametrize(
@@ -433,16 +434,26 @@ def test_build_md_mrg_config_from_args_assembles_settings(monkeypatch: pytest.Mo
 	source_dir.mkdir()
 	prompt_file = tmp_path / "score-prompt.txt"
 	prompt_file.write_text("score prompt", encoding="utf-8")
+	summary_prompt_file = tmp_path / "summary-prompt.txt"
+	summary_prompt_file.write_text("summary prompt", encoding="utf-8")
 
 	monkeypatch.setattr(
 		config,
 		"read_json_settings_file",
 		lambda: {
+			"ocr_model": {
+				"endpoint": "http://ocr-endpoint",
+				"model": "ocr-model",
+			},
 			"language_model": {
 				"endpoint": "http://language-endpoint",
 				"model": "language-model",
 				"timeout_seconds": 44.0,
 				"max_retries": 5,
+			},
+			"md_gen": {
+				"summary": {"prompt_path": str(summary_prompt_file)},
+				"image": {"max_longest_edge_px": 1540, "token_threshold": 4096},
 			},
 			"md_mrg": {
 				"score": {
@@ -462,11 +473,11 @@ def test_build_md_mrg_config_from_args_assembles_settings(monkeypatch: pytest.Mo
 
 	md_mrg_config = config.build_md_mrg_config_from_args(args)
 
-	assert md_mrg_config.source_dir == source_dir.resolve()
+	assert md_mrg_config.paths.source_dir == source_dir.resolve()
 	assert md_mrg_config.language_model.endpoint_url == "http://language-endpoint"
 	assert md_mrg_config.language_model.model_name == "language-model"
 	assert md_mrg_config.language_model.request_timeout_seconds == 44.0
 	assert md_mrg_config.language_model.request_max_retries == 5
-	assert md_mrg_config.md_mrg.score_prompt_path == prompt_file.resolve()
-	assert md_mrg_config.md_mrg.score_prompt_text == "score prompt"
+	assert md_mrg_config.md_mrg.score.summary_prompt_path == prompt_file.resolve()
+	assert md_mrg_config.md_mrg.score.summary_prompt_text == "score prompt"
 

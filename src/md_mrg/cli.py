@@ -4,6 +4,7 @@ import argparse
 from types import SimpleNamespace
 
 from common.config import ConfigValidationError, build_md_mrg_config_from_args
+from common.config_dump import format_config_dump
 
 from .apply import ApplyError, run_apply
 from .planner import PlannerError, run_plan
@@ -25,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--language-model-name", default=None)
     parser.add_argument("--language-timeout-seconds", type=float, default=None)
     parser.add_argument("--language-max-retries", type=int, default=None)
+    parser.add_argument("--verbose", action="store_true", default=False)
 
     return parser
 
@@ -42,12 +44,15 @@ def main() -> int:
         print(f"ERROR code=cli_argument_error message={type(exc).__name__}: {exc}")
         return 2
 
+    if args.verbose:
+        print(format_config_dump(config, command="md-mrg"))
+
     try:
         if args.plan:
-            run_plan(source_dir=config.source_dir, cfg=config)
+            run_plan(source_dir=config.paths.source_dir, cfg=config)
             return 0
 
-        run_apply(source_dir=config.source_dir, cfg=config)
+        run_apply(source_dir=config.paths.source_dir, cfg=config)
         return 0
     except (PlannerError, ApplyError) as exc:
         print(f"ERROR code={exc.error_code} message={exc}")

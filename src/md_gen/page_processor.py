@@ -30,7 +30,7 @@ def process_file(config: AppConfig, file_item: FileItem) -> dict[str, Any]:
         for page_number in pages:
             image = rasterizer.rasterize_page(
                 file_item.source_path,
-                max_edge_size=config.image.max_longest_edge_px,
+                max_edge_size=config.md_gen.image.max_longest_edge_px,
                 page_number=page_number if file_item.source_type == "pdf" else None,
             )
             try:

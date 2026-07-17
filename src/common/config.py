@@ -22,7 +22,6 @@ DEFAULT_SUMMARY_PROMPT_FILE = Path(__file__).resolve().parents[2] / "data" / "pr
 class PathSettings:
     source_dir: Path
     output_dir: Path
-    temp_dir: Path
 
 
 @dataclass(frozen=True)
@@ -52,26 +51,23 @@ class RuntimeSettings:
 
 
 @dataclass(frozen=True)
-class MdMrgSettings:
-    score_prompt_path: Path
-    score_prompt_text: str
+class MdGenSettings:
+    prompts: PromptSettings
+    image: ImageSettings
 
 
 @dataclass(frozen=True)
-class MdMrgConfig:
-    source_dir: Path
-    language_model: LlamaModelSettings
-    md_mrg: MdMrgSettings
-    runtime: RuntimeSettings
+class MdMrgSettings:
+    score: PromptSettings
 
 
 @dataclass(frozen=True)
 class AppConfig:
     paths: PathSettings
-    prompts: PromptSettings
     ocr_model: LlamaModelSettings
     language_model: LlamaModelSettings
-    image: ImageSettings
+    md_gen: MdGenSettings
+    md_mrg: MdMrgSettings
     runtime: RuntimeSettings
 
 
@@ -131,20 +127,17 @@ def read_json_settings_file() -> dict:
 def build_path_settings_from_args(args: SimpleNamespace) -> PathSettings:
     source_dir = _resolve_required_directory(args.source)
     output_dir = _resolve_output_directory(args.output)
-    temp_dir = output_dir / "temp"
     return PathSettings(
         source_dir=source_dir,
         output_dir=output_dir,
-        temp_dir=temp_dir,
     )
 
 
 def build_prompt_settings_from_args(args: SimpleNamespace, json_config: dict) -> PromptSettings:
-    summary_prompt_text = None
-
     summary_prompt_path = _resolve_optional_file(getattr(args, "summary_prompt", None))
     if summary_prompt_path is None:
-        summary_prompt_path = json_config.get("prompt_path", None)
+        summary_prompt_path = json_config.get("prompt_path")
+    summary_prompt_text = None
     if summary_prompt_path is not None:
         try:
             with open(summary_prompt_path, "r", encoding="utf-8") as f:
@@ -167,7 +160,7 @@ def build_prompt_settings_from_args(args: SimpleNamespace, json_config: dict) ->
     )
 
 def build_llama_model_settings_from_args(args: SimpleNamespace, json_config: dict) -> LlamaModelSettings:
-    _endpoint_url=args.model_endpoint
+    _endpoint_url = getattr(args, "model_endpoint", None)
     if _endpoint_url is None:
         _endpoint_url = json_config.get("endpoint")
     if _endpoint_url is None:
@@ -176,7 +169,7 @@ def build_llama_model_settings_from_args(args: SimpleNamespace, json_config: dic
             "Model endpoint URL must be specified either in the JSON config or as a command-line argument.",
         )
     
-    _model_name=args.model_name
+    _model_name = getattr(args, "model_name", None)
     if _model_name is None:
         _model_name = json_config.get("model", None)
     if _model_name is None:
@@ -185,14 +178,14 @@ def build_llama_model_settings_from_args(args: SimpleNamespace, json_config: dic
             "Model name must be specified either in the JSON config or as a command-line argument.",
         )
     
-    _request_timeout_seconds=args.timeout_seconds
+    _request_timeout_seconds = getattr(args, "timeout_seconds", None)
     if _request_timeout_seconds is None:
         _request_timeout_seconds = json_config.get("timeout_seconds")
     if _request_timeout_seconds is None:
         _request_timeout_seconds = 120.0
         print("INFO: Using default model request timeout of 120.0 seconds (missing setting in JSON and command-line argument)")
 
-    _request_max_retries=args.max_retries
+    _request_max_retries = getattr(args, "max_retries", None)
     if _request_max_retries is None:
         _request_max_retries = json_config.get("max_retries")
     if _request_max_retries is None:
@@ -207,14 +200,14 @@ def build_llama_model_settings_from_args(args: SimpleNamespace, json_config: dic
     )
 
 def build_image_settings_from_args(args: SimpleNamespace, json_config: dict) -> ImageSettings:
-    _max_longest_edge_px = args.max_longest_edge_px
+    _max_longest_edge_px = getattr(args, "max_longest_edge_px", None)
     if _max_longest_edge_px is None:
         _max_longest_edge_px = json_config.get("max_longest_edge_px")
         if _max_longest_edge_px is None:
             _max_longest_edge_px = 1540
             print("INFO: Using default max longest edge of 1540 pixels (missing setting in JSON and command-line argument)")
 
-    _token_threshold = args.token_threshold
+    _token_threshold = getattr(args, "token_threshold", None)
     if _token_threshold is None:
         _token_threshold = json_config.get("token_threshold")
         if _token_threshold is None:
@@ -258,16 +251,31 @@ def build_md_mrg_settings_from_json(json_config: dict) -> MdMrgSettings:
             f"md_mrg score prompt file is empty: {prompt_path}",
         )
 
-    return MdMrgSettings(
-        score_prompt_path=prompt_path,
-        score_prompt_text=score_prompt_text,
-    )
+    return MdMrgSettings(score=PromptSettings(
+        summary_prompt_path=prompt_path,
+        summary_prompt_text=score_prompt_text,
+    ))
 
 
-def build_md_mrg_config_from_args(args: SimpleNamespace) -> MdMrgConfig:
+def build_md_mrg_config_from_args(args: SimpleNamespace) -> AppConfig:
     json_config = read_json_settings_file()
 
     source_dir = _resolve_required_directory(args.source)
+
+    md_gen_json = json_config.get("md_gen", {})
+    if not md_gen_json:
+        raise ConfigValidationError(
+            "md_gen_config_missing",
+            "Missing 'md_gen' section in settings.json file.",
+        )
+
+    md_gen_settings = MdGenSettings(
+        prompts=build_prompt_settings_from_args(
+            SimpleNamespace(summary_prompt=None),
+            md_gen_json.get("summary", {}),
+        ),
+        image=build_image_settings_from_args(SimpleNamespace(), md_gen_json.get("image", {})),
+    )
 
     _language_args = SimpleNamespace(
         model_endpoint=getattr(args, "language_model_endpoint", None),
@@ -279,9 +287,11 @@ def build_md_mrg_config_from_args(args: SimpleNamespace) -> MdMrgConfig:
 
     md_mrg_settings = build_md_mrg_settings_from_json(json_config)
 
-    return MdMrgConfig(
-        source_dir=source_dir,
+    return AppConfig(
+        paths=PathSettings(source_dir=source_dir, output_dir=source_dir),
+        ocr_model=build_llama_model_settings_from_args(SimpleNamespace(), json_config.get("ocr_model", {})),
         language_model=language_model,
+        md_gen=md_gen_settings,
         md_mrg=md_mrg_settings,
         runtime=RuntimeSettings(
             dry_run=False,
@@ -322,12 +332,14 @@ def build_config_from_args(args: SimpleNamespace) -> AppConfig:
 
     _image = build_image_settings_from_args(args, md_gen_json.get("image", {}))
 
+    md_mrg_settings = build_md_mrg_settings_from_json(json_config)
+
     return AppConfig(
-        paths = _paths,
-        prompts = _prompts,
-        ocr_model = _ocr_model,
-        language_model = _language_model,
-        image = _image,
+        paths=_paths,
+        ocr_model=_ocr_model,
+        language_model=_language_model,
+        md_gen=MdGenSettings(prompts=_prompts, image=_image),
+        md_mrg=md_mrg_settings,
         runtime=RuntimeSettings(
             dry_run=args.dry_run,
             overwrite=args.overwrite,

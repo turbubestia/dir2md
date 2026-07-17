@@ -4,25 +4,37 @@ from pathlib import Path
 from PIL import Image
 import pytest
 
-from common.config import LlamaModelSettings, MdMrgConfig, MdMrgSettings, RuntimeSettings
+from common.config import AppConfig, ImageSettings, LlamaModelSettings, MdGenSettings, MdMrgSettings, PathSettings, PromptSettings, RuntimeSettings
 from md_mrg import apply as apply_mod
 from md_mrg import planner as planner_mod
 
 
-def _cfg(source_dir: Path) -> MdMrgConfig:
+def _cfg(source_dir: Path) -> AppConfig:
     prompt_file = source_dir / "prompt.md"
     prompt_file.write_text("score prompt", encoding="utf-8")
-    return MdMrgConfig(
-        source_dir=source_dir,
+    return AppConfig(
+        paths=PathSettings(source_dir=source_dir, output_dir=source_dir),
+        ocr_model=LlamaModelSettings(
+            endpoint_url="http://localhost:8080/v1/chat/completions",
+            model_name="lightonocr-2",
+            request_timeout_seconds=30.0,
+            request_max_retries=0,
+        ),
         language_model=LlamaModelSettings(
             endpoint_url="http://localhost:8081/v1/chat/completions",
             model_name="qwen3-1.7b",
             request_timeout_seconds=30.0,
             request_max_retries=0,
         ),
+        md_gen=MdGenSettings(
+            prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"),
+            image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096),
+        ),
         md_mrg=MdMrgSettings(
-            score_prompt_path=prompt_file,
-            score_prompt_text="score prompt",
+            score=PromptSettings(
+                summary_prompt_path=prompt_file,
+                summary_prompt_text="score prompt",
+            ),
         ),
         runtime=RuntimeSettings(dry_run=False, overwrite=False),
     )
@@ -59,6 +71,7 @@ def test_score_prompt_envelope_exact_markers() -> None:
 
 
 def test_parse_score_response_requires_json_numeric_score() -> None:
+    assert planner_mod._parse_score_response('{"bridge_score": 5}') == 5.0
     assert planner_mod._parse_score_response('{"score": 5}') == 5.0
 
     with pytest.raises(planner_mod.PlannerError, match="valid JSON"):
