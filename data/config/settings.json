@@ -1,16 +1,20 @@
 {
     "app_name": "dir2md",
     "version": "0.1.0",
+    "source_folder": "",
+    "output_folder": "",
+    "verbose": true,
+    "overwrite": true,
     "ocr_model": {
         "endpoint": "http://192.168.1.147:8080/v1/chat/completions",
         "model": "lightonocr-2",
-        "timeout_seconds": 120,
+        "timeout_seconds": 120.0,
         "max_retries": 3
     },
     "language_model": {
         "endpoint": "http://192.168.1.147:8081/v1/chat/completions",
         "model": "qwen3-1.7b",
-        "timeout_seconds": 120,
+        "timeout_seconds": 120.0,
         "max_retries": 3
     },
     "md_gen": {
@@ -23,7 +27,7 @@
         }
     },
     "md_mrg": {
-        "score" : {
+        "score": {
             "prompt_path": "data/prompts/md_mrg_score_system_prompt.md"
         }
     }

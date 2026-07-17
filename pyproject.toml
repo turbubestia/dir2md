@@ -3,10 +3,13 @@ name = "dir2md"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115.0",
     "httpx>=0.28.1",
     "pillow>=12.3.0",
     "pypdfium2>=5.11.0",
+    "pydantic>=2.10.0",
     "rapidfuzz>=3.14.1",
+    "uvicorn>=0.34.0",
 ]
 
 [project.scripts]
@@ -25,7 +28,8 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
-addopts = "--cov=md_gen --cov-report=term-missing --cov-fail-under=80"
+pythonpath = ["src"]
+addopts = "--cov=md_gen --cov=webapp --cov-report=term-missing --cov-fail-under=80"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/common", "src/md_gen", "src/md_mrg"]
+packages = ["src/common", "src/md_gen", "src/md_mrg", "src/webapp"]

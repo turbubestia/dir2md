@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html.dark,
+  html.dark body {
+    @apply bg-shell-bg text-shell-text;
+  }
+
+  body {
+    @apply antialiased;
+  }
+
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-shell-bg;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-shell-border rounded;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-accent-dim;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-shell-panel border border-shell-border rounded-lg;
+  }
+
+  .input-field {
+    @apply w-full bg-shell-bg border border-shell-border rounded px-3 py-2 text-sm text-shell-text placeholder-shell-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 rounded text-sm font-medium bg-shell-border text-shell-text hover:bg-shell-muted hover:text-white focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-shell-bg disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply px-3 py-2 rounded text-sm font-medium text-shell-muted hover:text-shell-text hover:bg-shell-panel focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-shell-bg;
+  }
+}

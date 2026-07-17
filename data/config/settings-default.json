@@ -1,6 +1,10 @@
 {
     "app_name": "dir2md",
     "version": "0.1.0",
+    "source_folder": "",
+    "output_folder": "",
+    "verbose": false,
+    "overwrite": false,
     "ocr_model": {
         "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
         "model": "lightonocr-2",
