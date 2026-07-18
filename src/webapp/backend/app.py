@@ -11,9 +11,9 @@ from typing import Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-from .models import AppSettings
+from .models import AppSettings, WorkflowDiscoveryResponse
 from .settings_store import (
     DEFAULT_SETTINGS_FILE,
     SETTINGS_FILE,
@@ -21,6 +21,7 @@ from .settings_store import (
     load_settings,
     save_settings,
 )
+from .workflow import WorkflowServiceError, discover_start, resolve_preview_path
 
 
 DEFAULT_ALLOWED_ORIGINS: Sequence[str] = [
@@ -77,6 +78,34 @@ def create_app(
         except SettingsStoreError as exc:
             return JSONResponse(
                 status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.post("/api/workflow/start")
+    def post_workflow_start() -> WorkflowDiscoveryResponse:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            return discover_start(settings)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/workflow/source-preview/{file_id}")
+    def get_source_preview(file_id: str) -> FileResponse:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            path = resolve_preview_path(settings, file_id)
+            return FileResponse(path)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
                 content={"detail": str(exc)},
             )  # type: ignore[return-value]
 

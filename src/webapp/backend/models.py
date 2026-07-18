@@ -7,7 +7,60 @@ browser UI can load and save the shared configuration file without reshaping it.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import AnyHttpUrl, BaseModel, Field, NonNegativeInt, PositiveFloat
+
+
+SourceFileType = Literal["pdf", "image"]
+FolderStatusKind = Literal[
+    "not_configured",
+    "missing",
+    "not_directory",
+    "inaccessible",
+    "empty",
+    "ready",
+]
+WorkflowMessageSeverity = Literal["info", "success", "warning", "error"]
+
+
+class WorkflowStatusMessage(BaseModel):
+    severity: WorkflowMessageSeverity
+    code: str
+    message: str
+
+
+class FolderStatus(BaseModel):
+    path: str
+    status: FolderStatusKind
+    message: str
+    item_count: int | None = None
+
+
+class WorkflowSourceFile(BaseModel):
+    id: str
+    display_name: str
+    absolute_path: str
+    extension: str
+    size_bytes: int
+    source_type: SourceFileType
+    order_index: int
+    preview_url: str | None = None
+
+
+class WorkflowMetrics(BaseModel):
+    pdf_count: int
+    image_count: int
+    total_count: int
+
+
+class WorkflowDiscoveryResponse(BaseModel):
+    ok: bool
+    source_status: FolderStatus
+    output_status: FolderStatus
+    metrics: WorkflowMetrics
+    items: list[WorkflowSourceFile]
+    messages: list[WorkflowStatusMessage]
 
 
 class ModelEndpointSettings(BaseModel):

@@ -1,8 +1,8 @@
 {
     "app_name": "dir2md",
     "version": "0.1.0",
-    "source_folder": "",
-    "output_folder": "",
+    "source_folder": "C:\\Development\\projects\\data\\source",
+    "output_folder": "C:\\Development\\projects\\data\\output",
     "verbose": true,
     "overwrite": true,
     "ocr_model": {

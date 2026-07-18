@@ -1,15 +1,8 @@
 import { useState } from 'react'
 import SettingsForm from './SettingsForm'
+import WorkflowPanel from './WorkflowPanel'
 
 type Section = 'workflow' | 'settings'
-
-const WORKFLOW_PANELS = [
-  'Source list',
-  'Source preview',
-  'batch_mrg.json',
-  'Merge-document preview',
-  'Output list',
-]
 
 export default function WorkspaceShell() {
   const [activeSection, setActiveSection] = useState<Section>('workflow')
@@ -78,21 +71,7 @@ export default function WorkspaceShell() {
         {/* Scrollable content */}
         <div className="flex-1 overflow-hidden p-3">
           {activeSection === 'workflow' ? (
-            <div className="flex h-full gap-3 overflow-x-auto">
-              {WORKFLOW_PANELS.map((label) => (
-                <section
-                  key={label}
-                  className="panel p-3 min-w-[240px] flex-1 flex flex-col"
-                >
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-shell-muted mb-2">
-                    {label}
-                  </h3>
-                  <div className="flex-1 flex items-center justify-center rounded border border-dashed border-shell-border bg-shell-bg/50">
-                    <span className="text-sm text-shell-muted">Placeholder</span>
-                  </div>
-                </section>
-              ))}
-            </div>
+            <WorkflowPanel />
           ) : (
             <SettingsForm />
           )}

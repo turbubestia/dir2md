@@ -1,17 +1,18 @@
 # dir2md Webapp
 
 This directory contains the local-first webapp scaffold for dir2md. It is
-intentionally limited to a single-window UI shell and a Settings editor in this
-phase. Workflow execution, previews, merge editing, and `batch_mrg.json`
-interactions are deferred to later phases.
+intentionally limited to a single-window UI shell, Settings editor, Start
+discovery workflow, and local-only placeholder stages in this phase. OCR, merge,
+rename, and `batch_mrg.json` persistence are deferred to later phases.
 
 ## Layout
 
 ```
 src/webapp/
-├── backend/          FastAPI settings API
+├── backend/          FastAPI settings and workflow discovery API
 │   ├── app.py        FastAPI application factory and routes
-│   ├── models.py     Pydantic settings schema
+│   ├── models.py     Pydantic settings and workflow schemas
+│   ├── workflow.py   Start discovery and source preview validation
 │   └── settings_store.py   Atomic read/write for data/config/settings.json
 └── frontend/         React + Vite + Tailwind browser UI
     ├── src/
@@ -22,9 +23,26 @@ src/webapp/
     │   ├── types.ts
     │   └── components/
     │       ├── WorkspaceShell.tsx
+        │       ├── WorkflowPanel.tsx
     │       └── SettingsForm.tsx
     └── package.json
 ```
+
+## API routes
+
+- `GET /health` returns backend liveness.
+- `GET /api/settings` loads the shared settings document.
+- `PUT /api/settings` validates and saves the shared settings document.
+- `POST /api/workflow/start` reads the configured source and output folders,
+    discovers supported top-level PDF/image source files through `md_gen`
+    discovery rules, and returns workflow metrics plus folder status messages.
+- `GET /api/workflow/source-preview/{file_id}` streams a validated image source
+    file from the current configured source folder. Preview ids are checked
+    against the current discovery result before bytes are returned.
+
+PDF preview is metadata-only in this phase. The OCR, Merge, and Rename stages in
+the frontend are visual simulations only; they do not call backend workflow
+endpoints and do not write output artifacts.
 
 ## Local development
 
@@ -78,14 +96,17 @@ The static assets are written to `src/webapp/frontend/dist`.
 ## Scope of this phase
 
 - ✅ FastAPI backend with `/health`, `GET /api/settings`, and `PUT /api/settings`
+- ✅ `POST /api/workflow/start` for configured-folder discovery
+- ✅ `GET /api/workflow/source-preview/{file_id}` for validated image previews
 - ✅ Pydantic validation and atomic writes to `data/config/settings.json`
 - ✅ Fixed dark theme with light blue accents
 - ✅ Collapsible left side panel with Workflow / Settings sections
-- ✅ Five horizontal workflow placeholder panels
+- ✅ Four-stage Workflow panel with Start discovery and simulated OCR/Merge/Rename
 - ✅ Settings form with OCR, language model, source/output folders, verbose, and overwrite
 - ❌ Running `md_gen` or `md_mrg` from the browser
-- ❌ Source/output listing population
-- ❌ Source/merge previews
+- ❌ Running OCR, merge, or rename from the browser
+- ❌ PDF rendering beyond metadata
+- ❌ Merge previews backed by generated artifacts
 - ❌ `batch_mrg.json` viewing or editing
 - ❌ Folder picker UX
 - ❌ Authentication / authorization

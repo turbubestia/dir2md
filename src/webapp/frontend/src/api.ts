@@ -1,4 +1,9 @@
-import type { AppSettings, ValidationError } from './types'
+import type {
+  AppSettings,
+  ValidationError,
+  WorkflowDiscoveryResponse,
+  WorkflowSourceFile,
+} from './types'
 
 const API_BASE = ''
 
@@ -44,4 +49,23 @@ export async function saveSettings(
   }
 
   return { ok: true, settings: await response.json() }
+}
+
+export async function startWorkflowDiscovery(): Promise<WorkflowDiscoveryResponse> {
+  const response = await fetch(`${API_BASE}/api/workflow/start`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Workflow start failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export function buildSourcePreviewUrl(
+  item: WorkflowSourceFile,
+): string | undefined {
+  return item.preview_url ?? undefined
 }
