@@ -18,6 +18,8 @@ const STAGES: { key: WorkflowStageKey; label: string }[] = [
   { key: 'rename', label: 'Rename' },
 ]
 
+type StageStatusLine = { label: string; value: string }
+
 const INITIAL_STAGE_STATES: Record<WorkflowStageKey, WorkflowStageState> = {
   start: 'enabled',
   ocr: 'unavailable',
@@ -45,6 +47,70 @@ function nextWarning(stage: string): WorkflowStatusMessage {
   }
 }
 
+function displayCount(hasValue: boolean, value: number): string {
+  return hasValue ? String(value) : '-'
+}
+
+function stageStatusLines({
+  stage,
+  hasDiscovery,
+  metrics,
+  ocrRows,
+  mergeRows,
+  renameRows,
+}: {
+  stage: WorkflowStageKey
+  hasDiscovery: boolean
+  metrics: typeof EMPTY_METRICS
+  ocrRows: OcrTreeRow[]
+  mergeRows: MergeRow[]
+  renameRows: RenameRow[]
+}): StageStatusLine[] {
+  if (stage === 'start') {
+    return [
+      { label: 'PDF Files', value: displayCount(hasDiscovery, metrics.pdf_count) },
+      { label: 'Image Files', value: displayCount(hasDiscovery, metrics.image_count) },
+    ]
+  }
+
+  if (stage === 'ocr') {
+    const markdownCount = ocrRows.length > 0 ? ocrRows.length : metrics.total_count
+    const imageGroups = metrics.image_count > 0 ? Math.ceil(metrics.image_count / 3) : 0
+    return [
+      { label: 'Markdown Files', value: displayCount(hasDiscovery, markdownCount) },
+      { label: 'PDF Documents', value: displayCount(hasDiscovery, metrics.pdf_count) },
+      { label: 'Image Groups', value: displayCount(hasDiscovery, imageGroups) },
+    ]
+  }
+
+  if (stage === 'merge') {
+    return [{ label: 'Documents', value: mergeRows.length > 0 ? String(mergeRows.length) : '-' }]
+  }
+
+  return [{ label: 'Documents', value: renameRows.length > 0 ? String(renameRows.length) : '-' }]
+}
+
+function connectorState(
+  stage: WorkflowStageKey,
+  nextStage: WorkflowStageKey,
+  stageStates: Record<WorkflowStageKey, WorkflowStageState>,
+): 'complete' | 'running' | 'inactive' {
+  if (stageStates[nextStage] === 'running' || stageStates[stage] === 'running') {
+    return 'running'
+  }
+  if (stageStates[stage] === 'complete') {
+    return 'complete'
+  }
+  return 'inactive'
+}
+
+function stageButtonFillClass(state: WorkflowStageState): string {
+  if (state === 'running' || state === 'complete' || state === 'selected') {
+    return 'bg-accent-dim border-accent text-white'
+  }
+  return 'bg-sky-200 border-sky-200 text-slate-950'
+}
+
 export default function WorkflowPanel() {
   const [selectedStage, setSelectedStage] = useState<WorkflowStageKey>('start')
   const [stageStates, setStageStates] =
@@ -69,6 +135,7 @@ export default function WorkflowPanel() {
   const selectedSource =
     items.find((item) => item.id === selectedSourceId) ?? items[0] ?? null
   const metrics = discovery?.metrics ?? EMPTY_METRICS
+  const hasDiscovery = discovery !== null
 
   function clearPendingTimer() {
     if (timerId !== null) {
@@ -176,51 +243,49 @@ export default function WorkflowPanel() {
   }
 
   return (
-    <section className="workflow-root panel">
+    <section className="workflow-root">
       <div className="workflow-toolbar">
-        <div className="workflow-stage-strip">
-          {STAGES.map((stage, index) => {
-            const state = selectedStage === stage.key ? 'selected' : stageStates[stage.key]
-            return (
-              <div key={stage.key} className="workflow-stage-slot">
-                <button
-                  type="button"
-                  onClick={() => handleStageClick(stage.key)}
-                  className={`workflow-stage workflow-stage-${state}`}
-                  aria-pressed={selectedStage === stage.key}
-                  aria-disabled={stageStates[stage.key] === 'unavailable'}
+        <div className="workflow-stage-rail" aria-label="Workflow stages">
+          <div className="workflow-stage-grid">
+            {STAGES.map((stage, index) => {
+              const state = selectedStage === stage.key ? 'selected' : stageStates[stage.key]
+              const nextStage = STAGES[index + 1]?.key
+              const outgoingState = nextStage ? connectorState(stage.key, nextStage, stageStates) : 'none'
+              const lines = stageStatusLines({
+                stage: stage.key,
+                hasDiscovery,
+                metrics,
+                ocrRows,
+                mergeRows,
+                renameRows,
+              })
+              return (
+                <div
+                  key={stage.key}
+                  className={`workflow-stage-block workflow-stage-block-${outgoingState}`}
                 >
-                  <span className="workflow-stage-index">{index + 1}</span>
-                  <span>{stage.label}</span>
-                </button>
-                {index < STAGES.length - 1 ? (
-                  <div
-                    className={`workflow-connector ${stageStates[stage.key] === 'complete' ? 'workflow-connector-complete' : ''}`}
-                  />
-                ) : null}
-              </div>
-            )
-          })}
-        </div>
-        <div className="workflow-metrics">
-          <div className="metric-cell">
-            <span>PDF</span>
-            <strong>{metrics.pdf_count}</strong>
-          </div>
-          <div className="metric-cell">
-            <span>Images</span>
-            <strong>{metrics.image_count}</strong>
-          </div>
-          <div className="metric-cell">
-            <span>Total</span>
-            <strong>{metrics.total_count}</strong>
-          </div>
-          <div className="metric-cell metric-cell-muted">
-            <span>Downstream</span>
-            <strong>{ocrRows.length || mergeRows.length || renameRows.length ? 'Simulated' : 'Pending'}</strong>
+                  <button
+                    type="button"
+                    onClick={() => handleStageClick(stage.key)}
+                    className={`workflow-stage workflow-stage-${state} ${stageButtonFillClass(state)}`}
+                    aria-pressed={selectedStage === stage.key}
+                    aria-disabled={stageStates[stage.key] === 'unavailable'}
+                  >
+                    <span>{stage.label}</span>
+                  </button>
+                  <div className="workflow-stage-status">
+                    {lines.map((line) => (
+                      <span key={line.label}>
+                        <span>{line.label}</span>
+                        <strong>{line.value}</strong>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
-        <StatusArea messages={messages} discovery={discovery} />
       </div>
 
       <div className="workflow-panels">
@@ -237,14 +302,19 @@ export default function WorkflowPanel() {
           />
         </section>
         <section className="workflow-panel workflow-preview-panel">
-          <h3 className="workflow-panel-title">Source preview</h3>
+          <h3 className="workflow-panel-title">Document preview</h3>
           <MiddlePanel selectedStage={selectedStage} selectedSource={selectedSource} />
         </section>
         <section className="workflow-panel workflow-preview-panel">
-          <h3 className="workflow-panel-title">Markdown preview</h3>
+          <div className="workflow-panel-heading">
+            <h3 className="workflow-panel-title">Markdown</h3>
+            <span>Code <strong>Preview</strong></span>
+          </div>
           <RightPanel selectedStage={selectedStage} selectedSource={selectedSource} />
         </section>
       </div>
+
+      <StatusArea messages={messages} discovery={discovery} />
     </section>
   )
 }
@@ -276,7 +346,7 @@ function StatusArea({
 
 function PanelTitle({ stage }: { stage: WorkflowStageKey }) {
   const titles: Record<WorkflowStageKey, string> = {
-    start: 'Source files',
+    start: 'Item list',
     ocr: 'OCR tree',
     merge: 'Merge groups',
     rename: 'Rename preview',
@@ -318,7 +388,6 @@ function LeftPanel({
             <span className="workflow-row-subtitle">
               {item.source_type.toUpperCase()} · {formatBytes(item.size_bytes)}
             </span>
-            <span className="workflow-row-path">{item.absolute_path}</span>
           </button>
         ))}
       </div>
