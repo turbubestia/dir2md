@@ -100,7 +100,7 @@ def discover_start(settings: AppSettings) -> WorkflowDiscoveryResponse:
 
 
 def resolve_preview_path(settings: AppSettings, file_id: str) -> Path:
-    """Resolve and validate a source image preview path for the current settings."""
+    """Resolve and validate a source preview path for the current settings."""
     source_status, source_dir = _inspect_source_folder(settings.source_folder)
     if source_dir is None:
         raise WorkflowServiceError(source_status.message, status_code=404)
@@ -129,8 +129,6 @@ def resolve_preview_path(settings: AppSettings, file_id: str) -> Path:
 
     for item in work_items:
         if item.source_path == candidate:
-            if item.source_type != "image":
-                raise WorkflowServiceError("Preview is only available for image sources.")
             return candidate
 
     raise WorkflowServiceError("Preview file is not a supported source item.", status_code=404)
@@ -232,11 +230,7 @@ def _settings_to_config(settings: AppSettings, source_dir: Path) -> AppConfig:
 def _source_file_from_work_item(item, source_dir: Path) -> WorkflowSourceFile:
     relative_path = item.source_path.relative_to(source_dir)
     file_id = _encode_file_id(relative_path)
-    preview_url = (
-        f"/api/workflow/source-preview/{file_id}"
-        if item.source_type == "image"
-        else None
-    )
+    preview_url = f"/api/workflow/source-preview/{file_id}"
     return WorkflowSourceFile(
         id=file_id,
         display_name=item.source_path.name,

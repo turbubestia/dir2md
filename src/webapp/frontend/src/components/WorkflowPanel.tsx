@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
+import { Document, Page, pdfjs } from 'react-pdf'
 import { buildSourcePreviewUrl, startWorkflowDiscovery } from '../api'
 import type {
   MergeRow,
@@ -11,6 +13,11 @@ import type {
   WorkflowStatusMessage,
 } from '../types'
 
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString()
+
 const STAGES: { key: WorkflowStageKey; label: string }[] = [
   { key: 'start', label: 'Start' },
   { key: 'ocr', label: 'OCR' },
@@ -19,6 +26,16 @@ const STAGES: { key: WorkflowStageKey; label: string }[] = [
 ]
 
 type StageStatusLine = { label: string; value: string }
+type PdfZoomMode = 'fit-width' | 'fit-height' | 'actual-size' | 'custom'
+type PdfPanState = {
+  pointerId: number
+  startX: number
+  startY: number
+  scrollLeft: number
+  scrollTop: number
+}
+
+const PDF_CSS_PIXELS_PER_POINT = 96 / 72
 
 const INITIAL_STAGE_STATES: Record<WorkflowStageKey, WorkflowStageState> = {
   start: 'enabled',
@@ -483,12 +500,217 @@ function MiddlePanel({
     )
   }
 
+  if (selectedSource.source_type === 'pdf' && previewUrl) {
+    return <PdfPreview fileUrl={previewUrl} />
+  }
+
   return (
     <div className="workflow-metadata">
       <span className="workflow-row-title">{selectedSource.display_name}</span>
-      <span>PDF preview is metadata-only in this phase.</span>
+      <span>Preview is unavailable for this source.</span>
       <span>{selectedSource.absolute_path}</span>
       <span>{formatBytes(selectedSource.size_bytes)}</span>
+    </div>
+  )
+}
+
+function PdfPreview({
+  fileUrl,
+}: {
+  fileUrl: string
+}) {
+  const viewerRef = useRef<HTMLDivElement | null>(null)
+  const panStateRef = useRef<PdfPanState | null>(null)
+  const [numPages, setNumPages] = useState<number | null>(null)
+  const [pageNumber, setPageNumber] = useState(1)
+  const [viewerSize, setViewerSize] = useState<{ width: number; height: number } | null>(null)
+  const [zoomMode, setZoomMode] = useState<PdfZoomMode>('fit-width')
+  const [customZoom, setCustomZoom] = useState(100)
+  const [isPanning, setIsPanning] = useState(false)
+
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) {
+      return
+    }
+
+    const updateSize = (width: number, height: number) => {
+      setViewerSize({
+        width: Math.max(160, Math.floor(width)),
+        height: Math.max(160, Math.floor(height)),
+      })
+    }
+
+    updateSize(viewer.clientWidth, viewer.clientHeight)
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      updateSize(rect?.width ?? viewer.clientWidth, rect?.height ?? viewer.clientHeight)
+    })
+    observer.observe(viewer)
+
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    setNumPages(null)
+    setPageNumber(1)
+  }, [fileUrl])
+
+  function handleLoadSuccess({ numPages: nextNumPages }: { numPages: number }) {
+    setNumPages(nextNumPages)
+    setPageNumber((currentPage) => Math.min(currentPage, nextNumPages))
+  }
+
+  function handlePanStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) {
+      return
+    }
+
+    const viewer = event.currentTarget
+    panStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: viewer.scrollLeft,
+      scrollTop: viewer.scrollTop,
+    }
+    viewer.setPointerCapture(event.pointerId)
+    setIsPanning(true)
+    event.preventDefault()
+  }
+
+  function handlePanMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const panState = panStateRef.current
+    if (!panState || panState.pointerId !== event.pointerId) {
+      return
+    }
+
+    const viewer = event.currentTarget
+    viewer.scrollLeft = panState.scrollLeft - (event.clientX - panState.startX)
+    viewer.scrollTop = panState.scrollTop - (event.clientY - panState.startY)
+  }
+
+  function handlePanEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    const panState = panStateRef.current
+    if (!panState || panState.pointerId !== event.pointerId) {
+      return
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    panStateRef.current = null
+    setIsPanning(false)
+  }
+
+  const canGoPrevious = pageNumber > 1
+  const canGoNext = numPages !== null && pageNumber < numPages
+  const actualSizeScale = PDF_CSS_PIXELS_PER_POINT
+  const customScale = actualSizeScale * (customZoom / 100)
+
+  function renderPage() {
+    if (viewerSize === null) {
+      return <span className="workflow-pdf-status">Preparing PDF preview...</span>
+    }
+
+    const commonPageProps = {
+      pageNumber,
+      renderAnnotationLayer: false,
+      renderTextLayer: false,
+    }
+
+    if (zoomMode === 'fit-height') {
+      return <Page {...commonPageProps} height={viewerSize.height} />
+    }
+    if (zoomMode === 'actual-size') {
+      return <Page {...commonPageProps} scale={actualSizeScale} />
+    }
+    if (zoomMode === 'custom') {
+      return <Page {...commonPageProps} scale={customScale} />
+    }
+    return <Page {...commonPageProps} width={viewerSize.width} />
+  }
+
+  return (
+    <div className="workflow-pdf-frame">
+      <div className="workflow-pdf-toolbar">
+        <div className="workflow-pdf-controls">
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={!canGoPrevious}
+            onClick={() => setPageNumber((currentPage) => Math.max(1, currentPage - 1))}
+          >
+            Previous
+          </button>
+          <span>
+            Page {pageNumber} of {numPages ?? '-'}
+          </span>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={!canGoNext}
+            onClick={() =>
+              setPageNumber((currentPage) =>
+                numPages === null ? currentPage : Math.min(numPages, currentPage + 1),
+              )
+            }
+          >
+            Next
+          </button>
+        </div>
+        <div className="workflow-pdf-controls">
+          <label className="workflow-pdf-zoom-label" htmlFor="workflow-pdf-zoom-mode">
+            Zoom
+          </label>
+          <select
+            id="workflow-pdf-zoom-mode"
+            className="workflow-pdf-select"
+            value={zoomMode}
+            onChange={(event) => setZoomMode(event.target.value as PdfZoomMode)}
+          >
+            <option value="fit-width">Fit width</option>
+            <option value="fit-height">Fit height</option>
+            <option value="actual-size">100%</option>
+            <option value="custom">Custom</option>
+          </select>
+          {zoomMode === 'custom' ? (
+            <label className="workflow-pdf-custom-zoom">
+              <input
+                type="number"
+                min="25"
+                max="300"
+                step="5"
+                value={customZoom}
+                onChange={(event) => {
+                  const nextZoom = Number(event.target.value)
+                  if (Number.isFinite(nextZoom)) {
+                    setCustomZoom(Math.min(300, Math.max(25, nextZoom)))
+                  }
+                }}
+              />
+              <span>%</span>
+            </label>
+          ) : null}
+        </div>
+      </div>
+      <div
+        className={`workflow-pdf-viewer${isPanning ? ' workflow-pdf-viewer-panning' : ''}`}
+        ref={viewerRef}
+        onPointerDown={handlePanStart}
+        onPointerMove={handlePanMove}
+        onPointerUp={handlePanEnd}
+        onPointerCancel={handlePanEnd}
+      >
+        <Document
+          file={fileUrl}
+          loading={<span className="workflow-pdf-status">Loading PDF...</span>}
+          error={<span className="workflow-pdf-status">PDF preview could not be loaded.</span>}
+          onLoadSuccess={handleLoadSuccess}
+        >
+          {renderPage()}
+        </Document>
+      </div>
     </div>
   )
 }

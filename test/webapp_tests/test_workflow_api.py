@@ -100,7 +100,7 @@ def test_start_discovers_supported_sources_in_natural_order(workflow_paths, tmp_
     image_items = [item for item in data["items"] if item["source_type"] == "image"]
     pdf_items = [item for item in data["items"] if item["source_type"] == "pdf"]
     assert all(item["preview_url"] for item in image_items)
-    assert pdf_items[0]["preview_url"] is None
+    assert pdf_items[0]["preview_url"]
 
 
 @pytest.mark.parametrize("files", [[], ["notes.txt", "archive.zip"]])
@@ -197,7 +197,23 @@ def test_valid_image_preview_returns_file_bytes(workflow_paths, tmp_path: Path):
     assert response.headers["content-type"].startswith("image/")
 
 
-def test_preview_rejects_pdf_unsupported_traversal_outside_and_missing(
+def test_valid_pdf_preview_returns_file_bytes(workflow_paths, tmp_path: Path):
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "scan.pdf").write_bytes(b"pdf bytes")
+    _write_settings(settings_path, source, tmp_path / "output")
+    client = _client(settings_path, defaults_path)
+    discovery = client.post("/api/workflow/start").json()
+
+    response = client.get(discovery["items"][0]["preview_url"])
+
+    assert response.status_code == 200
+    assert response.content == b"pdf bytes"
+    assert response.headers["content-type"].startswith("application/pdf")
+
+
+def test_preview_rejects_unsupported_traversal_outside_and_missing(
     workflow_paths,
     tmp_path: Path,
 ):
@@ -212,7 +228,6 @@ def test_preview_rejects_pdf_unsupported_traversal_outside_and_missing(
     client = _client(settings_path, defaults_path)
 
     cases = [
-        (_encoded_id("scan.pdf"), 400),
         (_encoded_id("notes.txt"), 404),
         (_encoded_id("../outside.png"), 400),
         (_encoded_id(outside.as_posix()), 400),
@@ -223,4 +238,3 @@ def test_preview_rejects_pdf_unsupported_traversal_outside_and_missing(
         assert response.status_code == expected_status
         assert b"outside bytes" not in response.content
         assert b"secret text" not in response.content
-        assert b"pdf bytes" not in response.content

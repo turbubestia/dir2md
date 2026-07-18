@@ -281,6 +281,65 @@
     @apply max-h-full max-w-full object-contain rounded;
   }
 
+  .workflow-pdf-frame {
+    @apply flex-1 min-h-0 border border-shell-border bg-black/20 flex flex-col overflow-hidden;
+  }
+
+  .workflow-pdf-toolbar {
+    @apply flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-shell-border bg-shell-panel px-3 py-2;
+  }
+
+  .workflow-pdf-controls {
+    @apply flex flex-shrink-0 items-center gap-2 text-xs text-shell-muted;
+  }
+
+  .workflow-pdf-controls .btn-ghost {
+    @apply px-2 py-1;
+  }
+
+  .workflow-pdf-zoom-label {
+    @apply text-xs font-semibold uppercase tracking-wider text-shell-muted;
+  }
+
+  .workflow-pdf-select,
+  .workflow-pdf-custom-zoom input {
+    @apply rounded border border-shell-border bg-shell-bg px-2 py-1 text-xs text-shell-text focus:outline-none focus:ring-1 focus:ring-accent;
+  }
+
+  .workflow-pdf-custom-zoom {
+    @apply flex items-center gap-1 text-xs text-shell-muted;
+  }
+
+  .workflow-pdf-custom-zoom input {
+    @apply w-16;
+  }
+
+  .workflow-pdf-viewer {
+    @apply flex-1 min-h-0 overflow-auto p-3 cursor-grab;
+  }
+
+  .workflow-pdf-viewer-panning {
+    @apply cursor-grabbing select-none;
+  }
+
+  .workflow-pdf-viewer .react-pdf__Document {
+    @apply flex min-h-full items-start justify-center;
+    min-width: 100%;
+    width: max-content;
+  }
+
+  .workflow-pdf-viewer .react-pdf__Page {
+    @apply shadow-lg;
+  }
+
+  .workflow-pdf-viewer .react-pdf__Page canvas {
+    @apply block;
+  }
+
+  .workflow-pdf-status {
+    @apply m-auto text-sm text-shell-muted;
+  }
+
   .workflow-metadata,
   .workflow-markdown-preview {
     @apply flex-1 min-h-0 overflow-auto border border-shell-border bg-shell-panel p-3 text-sm text-shell-muted flex flex-col gap-2 break-words;
