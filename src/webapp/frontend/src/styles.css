@@ -72,20 +72,11 @@
   }
 
   .workflow-stage-grid {
-    @apply relative z-10 grid grid-cols-4 gap-0;
+    @apply relative z-10 flex justify-between gap-0;
   }
 
   .workflow-stage-block {
-    @apply relative min-w-0 flex flex-col items-start gap-1;
-  }
-
-  .workflow-stage-block:nth-child(2),
-  .workflow-stage-block:nth-child(3) {
-    @apply items-center;
-  }
-
-  .workflow-stage-block:nth-child(4) {
-    @apply items-end;
+    @apply relative w-[6.25rem] flex-none flex flex-col items-start gap-1;
   }
 
   .workflow-stage-block::before {
