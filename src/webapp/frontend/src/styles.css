@@ -236,6 +236,22 @@
     @apply text-accent;
   }
 
+  .workflow-markdown-toggle {
+    @apply flex rounded-md border border-shell-border bg-shell-bg p-0.5;
+  }
+
+  .workflow-markdown-toggle button {
+    @apply min-w-16 rounded px-2 py-1 text-xs font-medium text-shell-muted transition-colors focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-shell-bg;
+  }
+
+  .workflow-markdown-toggle button:hover {
+    @apply text-shell-text;
+  }
+
+  .workflow-markdown-toggle .workflow-markdown-toggle-active {
+    @apply bg-accent text-slate-950;
+  }
+
   .workflow-scroll-list {
     @apply flex-1 min-h-0 overflow-auto space-y-1.5 pr-1 rounded-md border border-shell-border p-2;
   }
@@ -471,13 +487,114 @@
 
   .workflow-metadata,
   .workflow-markdown-preview {
-    @apply flex-1 min-h-0 overflow-auto border border-shell-border bg-shell-panel p-3 text-sm text-shell-muted flex flex-col gap-2 break-words;
+    @apply flex-1 min-h-0 overflow-auto border border-shell-border bg-shell-panel p-3 text-sm text-shell-muted break-words;
   }
 
   .workflow-markdown-preview {
-    white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
+  }
+
+  .workflow-metadata,
+  .workflow-markdown-placeholder {
+    @apply flex flex-col gap-2;
+  }
+
+  .workflow-markdown-code-view {
+    @apply font-mono text-xs leading-5;
+    white-space: pre-wrap;
+  }
+
+  .workflow-markdown-code-view pre,
+  .workflow-markdown-code-view code {
+    @apply whitespace-pre-wrap break-words;
+    overflow-wrap: anywhere;
+  }
+
+  .workflow-markdown-code {
+    @apply font-mono text-xs leading-5;
+  }
+
+  .workflow-markdown-rendered {
+    @apply text-shell-text leading-6;
+  }
+
+  .workflow-markdown-rendered > * + * {
+    @apply mt-3;
+  }
+
+  .workflow-markdown-rendered h1,
+  .workflow-markdown-rendered h2,
+  .workflow-markdown-rendered h3 {
+    @apply font-semibold text-shell-text;
+  }
+
+  .workflow-markdown-rendered h1 {
+    @apply text-xl;
+  }
+
+  .workflow-markdown-rendered h2 {
+    @apply text-lg;
+  }
+
+  .workflow-markdown-rendered h3 {
+    @apply text-base;
+  }
+
+  .workflow-markdown-rendered p,
+  .workflow-markdown-rendered li {
+    @apply text-sm text-shell-text;
+  }
+
+  .workflow-markdown-rendered ul,
+  .workflow-markdown-rendered ol {
+    @apply pl-5;
+  }
+
+  .workflow-markdown-rendered ul {
+    @apply list-disc;
+  }
+
+  .workflow-markdown-rendered ol {
+    @apply list-decimal;
+  }
+
+  .workflow-markdown-rendered blockquote {
+    @apply border-l-2 border-accent pl-3 text-shell-muted;
+  }
+
+  .workflow-markdown-rendered a {
+    @apply text-accent underline underline-offset-2;
+  }
+
+  .workflow-markdown-rendered table {
+    @apply w-full border-collapse text-left text-sm;
+  }
+
+  .workflow-markdown-rendered th,
+  .workflow-markdown-rendered td {
+    @apply border border-shell-border px-2 py-1 align-top;
+  }
+
+  .workflow-markdown-rendered th {
+    @apply bg-shell-bg font-semibold text-shell-text;
+  }
+
+  .workflow-markdown-rendered code {
+    @apply rounded bg-shell-bg px-1 py-0.5 font-mono text-xs text-accent;
+  }
+
+  .workflow-markdown-rendered pre {
+    @apply overflow-auto rounded border border-shell-border bg-shell-bg p-3;
+  }
+
+  .workflow-markdown-rendered pre code {
+    @apply bg-transparent p-0 text-shell-text;
+  }
+
+  .workflow-markdown-rendered img,
+  .workflow-markdown-rendered svg {
+    @apply max-w-full;
   }
 
   @media (max-width: 1023px) {

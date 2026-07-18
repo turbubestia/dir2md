@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
+import { MathJax, MathJaxContext } from 'better-react-mathjax'
 import { Document, Page, pdfjs } from 'react-pdf'
+import ReactMarkdown from 'react-markdown'
+import rehypeMathjax from 'rehype-mathjax/svg'
+import rehypeRaw from 'rehype-raw'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import {
   WORKFLOW_EVENTS_URL,
   buildOcrArtifactPreviewUrl,
@@ -47,6 +56,7 @@ type StageStatusLine = { label: string; value: string }
 type SourceOcrStatus = 'pending' | 'running' | 'done' | 'failed'
 type PdfZoomMode = 'fit-width' | 'fit-height' | 'actual-size' | 'custom'
 type MarkdownPreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
+type MarkdownViewMode = 'code' | 'preview'
 type PdfPanState = {
   pointerId: number
   startX: number
@@ -66,6 +76,17 @@ const INITIAL_STAGE_STATES: Record<WorkflowStageKey, WorkflowStageState> = {
 
 const EMPTY_METRICS = { pdf_count: 0, image_count: 0, total_count: 0 }
 const EMPTY_ITEMS: WorkflowSourceFile[] = []
+const MARKDOWN_SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      ['className', 'language-math', 'math-inline', 'math-display'],
+    ],
+  },
+  tagNames: [...(defaultSchema.tagNames ?? []), 'mark'],
+}
 
 function formatBytes(sizeBytes: number): string {
   if (sizeBytes < 1024) {
@@ -304,6 +325,7 @@ export default function WorkflowPanel() {
   const [dragSnapshot, setDragSnapshot] = useState<EditableMergePlan | null>(null)
   const [markdownPreview, setMarkdownPreview] = useState<MarkdownPreviewResponse | null>(null)
   const [markdownPreviewStatus, setMarkdownPreviewStatus] = useState<MarkdownPreviewStatus>('idle')
+  const [markdownViewMode, setMarkdownViewMode] = useState<MarkdownViewMode>('preview')
   const [messages, setMessages] = useState<WorkflowStatusMessage[]>([])
   const [mergeRows, setMergeRows] = useState<MergeRow[]>([])
   const [renameRows, setRenameRows] = useState<RenameRow[]>([])
@@ -785,7 +807,19 @@ export default function WorkflowPanel() {
         <section className="workflow-panel workflow-preview-panel">
           <div className="workflow-panel-heading">
             <h3 className="workflow-panel-title">Markdown</h3>
-            <span>Code <strong>Preview</strong></span>
+            <div className="workflow-markdown-toggle" role="group" aria-label="Markdown view mode">
+              {(['code', 'preview'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={markdownViewMode === mode ? 'workflow-markdown-toggle-active' : ''}
+                  aria-pressed={markdownViewMode === mode}
+                  onClick={() => setMarkdownViewMode(mode)}
+                >
+                  {mode === 'code' ? 'Code' : 'Preview'}
+                </button>
+              ))}
+            </div>
           </div>
           <RightPanel
             selectedStage={selectedStage}
@@ -793,6 +827,7 @@ export default function WorkflowPanel() {
             selectedPlanItem={selectedPlanItem}
             markdownPreview={markdownPreview}
             markdownPreviewStatus={markdownPreviewStatus}
+            markdownViewMode={markdownViewMode}
           />
         </section>
       </div>
@@ -1438,12 +1473,14 @@ function RightPanel({
   selectedPlanItem,
   markdownPreview,
   markdownPreviewStatus,
+  markdownViewMode,
 }: {
   selectedStage: WorkflowStageKey
   selectedSource: WorkflowSourceFile | null
   selectedPlanItem: EditablePlanDocument | null
   markdownPreview: MarkdownPreviewResponse | null
   markdownPreviewStatus: MarkdownPreviewStatus
+  markdownViewMode: MarkdownViewMode
 }) {
   if (selectedStage === 'start') {
     return <EmptyPanel text="Markdown preview is unavailable before OCR." />
@@ -1459,16 +1496,39 @@ function RightPanel({
     if (markdownPreviewStatus === 'error') {
       return <EmptyPanel text="Markdown preview could not be loaded." />
     }
+    const content = markdownPreview?.content || 'Markdown preview is empty.'
+    if (markdownViewMode === 'code') {
+      return (
+        <div className="workflow-markdown-preview workflow-markdown-code-view">
+          <SyntaxHighlighter
+            language="markdown"
+            style={oneDark}
+            customStyle={{ margin: 0, background: 'transparent', padding: 0 }}
+            codeTagProps={{ className: 'workflow-markdown-code' }}
+            wrapLongLines
+          >
+            {content}
+          </SyntaxHighlighter>
+        </div>
+      )
+    }
     return (
-      <pre className="workflow-markdown-preview">
-        {markdownPreview?.content || 'Markdown preview is empty.'}
-      </pre>
+      <MathJaxContext>
+        <MathJax dynamic className="workflow-markdown-preview workflow-markdown-rendered">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeRaw, [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA], rehypeMathjax]}
+          >
+            {content}
+          </ReactMarkdown>
+        </MathJax>
+      </MathJaxContext>
     )
   }
 
   const name = selectedSource?.display_name ?? 'selected source'
   return (
-    <div className="workflow-markdown-preview">
+    <div className="workflow-markdown-preview workflow-markdown-placeholder">
       <span># {selectedStage.toUpperCase()} placeholder</span>
       <span>Source: {name}</span>
       <span>Generated content will appear here when this stage is implemented.</span>
