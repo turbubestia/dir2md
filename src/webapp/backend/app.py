@@ -6,14 +6,16 @@ invoke ``md_gen`` or ``md_mrg``; those remain CLI responsibilities.
 
 from __future__ import annotations
 
+import json
+import queue
 from pathlib import Path
 from typing import Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from .models import AppSettings, WorkflowDiscoveryResponse
+from .models import AppSettings, WorkflowDiscoveryResponse, WorkflowState
 from .settings_store import (
     DEFAULT_SETTINGS_FILE,
     SETTINGS_FILE,
@@ -21,7 +23,7 @@ from .settings_store import (
     load_settings,
     save_settings,
 )
-from .workflow import WorkflowServiceError, discover_start, resolve_preview_path
+from .workflow import WorkflowService, WorkflowServiceError
 
 
 DEFAULT_ALLOWED_ORIGINS: Sequence[str] = [
@@ -48,6 +50,7 @@ def create_app(
     )
 
     origins = list(allowed_origins if allowed_origins is not None else DEFAULT_ALLOWED_ORIGINS)
+    workflow_service = WorkflowService()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -85,18 +88,58 @@ def create_app(
     def post_workflow_start() -> WorkflowDiscoveryResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
-            return discover_start(settings)
+            return workflow_service.discover_start(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
                 status_code=500,
                 content={"detail": str(exc)},
             )  # type: ignore[return-value]
 
+    @application.post("/api/workflow/ocr")
+    def post_workflow_ocr() -> WorkflowState:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            return workflow_service.start_ocr(settings)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/workflow/state")
+    def get_workflow_state() -> WorkflowState:
+        return workflow_service.get_state()
+
+    @application.get("/api/workflow/events")
+    def get_workflow_events(once: bool = False) -> StreamingResponse:
+        subscriber = workflow_service.subscribe()
+
+        def stream():
+            try:
+                while True:
+                    try:
+                        state = subscriber.get(timeout=0.25)
+                    except queue.Empty:
+                        continue
+                    payload = json.dumps(state.model_dump(mode="json"), ensure_ascii=False)
+                    yield f"event: workflow_state\ndata: {payload}\n\n"
+                    if once:
+                        break
+            finally:
+                workflow_service.unsubscribe(subscriber)
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
+
     @application.get("/api/workflow/source-preview/{file_id}")
     def get_source_preview(file_id: str) -> FileResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
-            path = resolve_preview_path(settings, file_id)
+            path = workflow_service.resolve_preview_path(settings, file_id)
             return FileResponse(path)
         except SettingsStoreError as exc:
             return JSONResponse(

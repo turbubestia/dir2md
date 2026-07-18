@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from webapp.backend.app import create_app
+from md_gen.progress import GenerationProgressEvent
+from md_mrg.planner import PlanningProgressEvent
 
 
 def _settings_payload(source_folder: str = "", output_folder: str = "") -> dict:
@@ -64,6 +68,16 @@ def _write_settings(settings_path: Path, source: Path | str, output: Path | str 
         json.dumps(_settings_payload(str(source), str(output))),
         encoding="utf-8",
     )
+
+
+def _wait_for_state(client: TestClient, status: str, timeout: float = 2.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = client.get("/api/workflow/state").json()
+        if state["ocr_status"] == status:
+            return state
+        time.sleep(0.01)
+    return client.get("/api/workflow/state").json()
 
 
 def _encoded_id(relative_path: str) -> str:
@@ -238,3 +252,118 @@ def test_preview_rejects_unsupported_traversal_outside_and_missing(
         assert response.status_code == expected_status
         assert b"outside bytes" not in response.content
         assert b"secret text" not in response.content
+
+
+def test_workflow_state_is_idle_before_start(workflow_paths) -> None:
+    settings_path, defaults_path = workflow_paths
+
+    response = _client(settings_path, defaults_path).get("/api/workflow/state")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["discovery"] is None
+    assert data["ocr_status"] == "idle"
+    assert data["progress"]["percent"] == 0.0
+
+
+def test_ocr_requires_successful_non_empty_start(workflow_paths) -> None:
+    settings_path, defaults_path = workflow_paths
+
+    client = _client(settings_path, defaults_path)
+
+    response = client.post("/api/workflow/ocr")
+
+    assert response.status_code == 400
+
+
+def test_ocr_runs_generation_then_planning_and_updates_state(workflow_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    (source / "scan-1.png").write_bytes(b"png")
+    (source / "scan-2.png").write_bytes(b"png")
+    _write_settings(settings_path, source, output)
+
+    def fake_generation(config, progress_callback=None):
+        if progress_callback:
+            progress_callback(GenerationProgressEvent(kind="stage_start", total_jobs=2))
+            progress_callback(GenerationProgressEvent(kind="ocr_item_start", total_jobs=2, source_path=source / "scan-1.png", source_file_name="scan-1.png", source_type="image", page_number=1, markdown_path=output / "scan-1.md"))
+            progress_callback(GenerationProgressEvent(kind="ocr_item_complete", total_jobs=2, completed_jobs=1, markdown_count=1, source_path=source / "scan-1.png", source_file_name="scan-1.png", source_type="image", page_number=1, markdown_path=output / "scan-1.md"))
+            progress_callback(GenerationProgressEvent(kind="batch_persisted", total_jobs=2, completed_jobs=2, markdown_count=2, markdown_path=output / "batch.json"))
+        (output / "batch.json").write_text(json.dumps({"documents": [
+            {"source_file_name": "scan-1.png", "file_type": "image", "markdown_file": "scan-1.md"},
+            {"source_file_name": "report.pdf", "file_type": "pdf", "markdown_file": "report.md"},
+        ]}), encoding="utf-8")
+        return 0
+
+    def fake_plan(source_dir, cfg, *, progress_callback=None):
+        if progress_callback:
+            progress_callback(PlanningProgressEvent(kind="plan_start", total_comparisons=1, pdf_document_count=1))
+            progress_callback(PlanningProgressEvent(kind="comparison_start", total_comparisons=1, left_display_name="scan-1.png", right_display_name="scan-2.png", pdf_document_count=1))
+            progress_callback(PlanningProgressEvent(kind="comparison_complete", total_comparisons=1, completed_comparisons=1, left_display_name="scan-1.png", right_display_name="scan-2.png", score_status="scored", score=7, pdf_document_count=1))
+            progress_callback(PlanningProgressEvent(kind="plan_persisted", total_comparisons=1, completed_comparisons=1, pdf_document_count=1, image_group_count=1))
+        payload = {"documents": [{"documents": []}, {"source_file_name": "report.pdf", "file_type": "pdf"}]}
+        (output / "batch_mrg.json").write_text(json.dumps(payload), encoding="utf-8")
+        return payload
+
+    monkeypatch.setattr("webapp.backend.workflow.md_gen_foundation.run_generation", fake_generation)
+    monkeypatch.setattr("webapp.backend.workflow.md_mrg_planner.run_plan", fake_plan)
+    client = _client(settings_path, defaults_path)
+    client.post("/api/workflow/start")
+
+    response = client.post("/api/workflow/ocr")
+    assert response.status_code == 200
+    assert response.json()["ocr_status"] == "running"
+
+    state = _wait_for_state(client, "complete")
+    assert state["ocr_status"] == "complete"
+    assert state["progress"]["percent"] == 100.0
+    assert state["counts"] == {"markdown_count": 2, "pdf_document_count": 1, "image_group_count": 1}
+    assert state["current_item"] is None
+    assert state["active_comparison"] is None
+
+
+def test_ocr_conflict_while_running(workflow_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    (source / "scan.png").write_bytes(b"png")
+    _write_settings(settings_path, source, output)
+    release = threading.Event()
+
+    def fake_generation(config, progress_callback=None):
+        if progress_callback:
+            progress_callback(GenerationProgressEvent(kind="stage_start", total_jobs=1))
+        release.wait(timeout=2)
+        (output / "batch.json").write_text(json.dumps({"documents": []}), encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr("webapp.backend.workflow.md_gen_foundation.run_generation", fake_generation)
+    monkeypatch.setattr("webapp.backend.workflow.md_mrg_planner.run_plan", lambda source_dir, cfg, *, progress_callback=None: (output / "batch_mrg.json").write_text('{"documents": []}', encoding="utf-8") or {"documents": []})
+    client = _client(settings_path, defaults_path)
+    client.post("/api/workflow/start")
+    assert client.post("/api/workflow/ocr").status_code == 200
+
+    conflict = client.post("/api/workflow/ocr")
+    release.set()
+
+    assert conflict.status_code == 409
+
+
+def test_workflow_events_streams_current_state_first(workflow_paths) -> None:
+    settings_path, defaults_path = workflow_paths
+    client = _client(settings_path, defaults_path)
+
+    response = client.get("/api/workflow/events?once=true")
+
+    assert response.status_code == 200
+    lines = response.text.splitlines()
+    assert lines[0] == "event: workflow_state"
+    data_line = lines[1]
+    assert data_line.startswith("data: ")
+    payload = json.loads(data_line.removeprefix("data: "))
+    assert payload["ocr_status"] == "idle"

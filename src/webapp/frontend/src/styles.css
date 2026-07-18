@@ -131,6 +131,11 @@
     color: #ffffff;
   }
 
+  .workflow-stage-failed {
+    @apply border-red-500 bg-red-950 text-red-100;
+    box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.25);
+  }
+
   .workflow-stage-status {
     @apply grid min-h-[3.25rem] grid-cols-[max-content_1.5rem] text-xs font-semibold leading-4 text-shell-text;
     align-content: start;
@@ -245,6 +250,14 @@
     @apply border-accent bg-shell-border;
   }
 
+  .workflow-row-active-ocr {
+    @apply border-sky-300 bg-sky-950/50;
+  }
+
+  .workflow-row-active-comparison {
+    @apply border-amber-300 bg-amber-950/40;
+  }
+
   .workflow-row-title {
     @apply text-sm font-medium text-shell-text break-words;
   }
@@ -259,6 +272,18 @@
 
   .workflow-tree-row {
     @apply relative pl-7;
+  }
+
+  .workflow-tree-row-running {
+    @apply border-sky-300 bg-sky-950/50;
+  }
+
+  .workflow-tree-row-complete {
+    @apply border-emerald-600 bg-emerald-950/30;
+  }
+
+  .workflow-tree-row-failed {
+    @apply border-red-600 bg-red-950/30;
   }
 
   .workflow-tree-branch {

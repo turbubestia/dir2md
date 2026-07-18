@@ -8,6 +8,7 @@ from PIL import Image
 from common.config import AppConfig, ImageSettings, LlamaModelSettings, MdGenSettings, MdMrgSettings, PathSettings, PromptSettings, RuntimeSettings
 from md_gen.discovery import FileItem
 from md_gen.page_processor import process_file
+from md_gen.progress import GenerationProgressContext, GenerationProgressEvent
 
 
 def _make_config(output_dir: Path, *, overwrite: bool = False) -> AppConfig:
@@ -110,6 +111,44 @@ def test_process_file_handles_multi_page_pdf(tmp_path: Path) -> None:
     output_path = output_dir / "doc.md"
     assert output_path.read_text(encoding="utf-8") == "# Page 1\n\n# Page 2\n"
     assert mock_rasterizer.rasterize_page.call_count == 2
+
+
+def test_process_file_emits_page_progress_for_pdf(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    config = _make_config(output_dir)
+    source_path = tmp_path / "doc.pdf"
+    source_path.write_bytes(b"pdf")
+    file_item = FileItem(source_path=source_path, source_type="pdf", order_index=0, ordering_key=("doc.pdf",))
+    events: list[GenerationProgressEvent] = []
+
+    with (
+        patch("md_gen.page_processor.rasterizer") as mock_rasterizer,
+        patch("md_gen.page_processor.ocr_processor") as mock_ocr,
+        patch("md_gen.page_processor.summarize") as mock_summarize,
+    ):
+        mock_rasterizer.get_pdf_page_count.return_value = 2
+        mock_rasterizer.rasterize_page.side_effect = [_make_image(), _make_image()]
+        mock_ocr.extract_markdown.side_effect = ["# Page 1", "# Page 2"]
+        mock_summarize.summarize_page.side_effect = ["summary 1", "summary 2"]
+        mock_summarize.summarize_document.return_value = "combined summary"
+
+        process_file(
+            config,
+            file_item,
+            progress_callback=events.append,
+            progress_context=GenerationProgressContext(total_jobs=2),
+        )
+
+    assert [event.kind for event in events] == [
+        "ocr_item_start",
+        "ocr_item_complete",
+        "ocr_item_start",
+        "ocr_item_complete",
+    ]
+    assert [event.page_number for event in events] == [1, 1, 2, 2]
+    assert [event.completed_jobs for event in events] == [0, 1, 1, 2]
+    assert events[-1].markdown_count == 2
 
 
 def test_process_file_writes_partial_markdown_on_failure(tmp_path: Path) -> None:

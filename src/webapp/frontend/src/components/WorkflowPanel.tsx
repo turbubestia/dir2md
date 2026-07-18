@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
-import { buildSourcePreviewUrl, startWorkflowDiscovery } from '../api'
+import {
+  WORKFLOW_EVENTS_URL,
+  buildSourcePreviewUrl,
+  fetchWorkflowState,
+  startWorkflowDiscovery,
+  startWorkflowOcr,
+} from '../api'
 import type {
   MergeRow,
   OcrTreeRow,
   RenameRow,
   WorkflowDiscoveryResponse,
+  WorkflowState,
   WorkflowSourceFile,
   WorkflowStageKey,
   WorkflowStageState,
@@ -45,6 +52,7 @@ const INITIAL_STAGE_STATES: Record<WorkflowStageKey, WorkflowStageState> = {
 }
 
 const EMPTY_METRICS = { pdf_count: 0, image_count: 0, total_count: 0 }
+const EMPTY_ITEMS: WorkflowSourceFile[] = []
 
 function formatBytes(sizeBytes: number): string {
   if (sizeBytes < 1024) {
@@ -72,14 +80,14 @@ function stageStatusLines({
   stage,
   hasDiscovery,
   metrics,
-  ocrRows,
+  workflowState,
   mergeRows,
   renameRows,
 }: {
   stage: WorkflowStageKey
   hasDiscovery: boolean
   metrics: typeof EMPTY_METRICS
-  ocrRows: OcrTreeRow[]
+  workflowState: WorkflowState | null
   mergeRows: MergeRow[]
   renameRows: RenameRow[]
 }): StageStatusLine[] {
@@ -91,12 +99,11 @@ function stageStatusLines({
   }
 
   if (stage === 'ocr') {
-    const markdownCount = ocrRows.length > 0 ? ocrRows.length : metrics.total_count
-    const imageGroups = metrics.image_count > 0 ? Math.ceil(metrics.image_count / 3) : 0
+    const counts = workflowState?.counts
     return [
-      { label: 'Markdown Files', value: displayCount(hasDiscovery, markdownCount) },
-      { label: 'PDF Documents', value: displayCount(hasDiscovery, metrics.pdf_count) },
-      { label: 'Image Groups', value: displayCount(hasDiscovery, imageGroups) },
+      { label: 'Markdown Files', value: displayCount(hasDiscovery, counts?.markdown_count ?? 0) },
+      { label: 'PDF Documents', value: displayCount(hasDiscovery, counts?.pdf_document_count ?? 0) },
+      { label: 'Image Groups', value: displayCount(hasDiscovery, counts?.image_group_count ?? 0) },
     ]
   }
 
@@ -122,6 +129,9 @@ function connectorState(
 }
 
 function stageButtonFillClass(state: WorkflowStageState): string {
+  if (state === 'failed') {
+    return 'bg-red-950 border-red-500 text-red-100'
+  }
   if (state === 'running' || state === 'complete' || state === 'selected') {
     return 'bg-accent-dim border-accent text-white'
   }
@@ -136,12 +146,53 @@ function stageProgressPercent(stage: WorkflowStageKey): number {
   return (stageIndex / (STAGES.length - 1)) * 100
 }
 
+function ocrRowsFromWorkflow(items: WorkflowSourceFile[], workflowState: WorkflowState | null): OcrTreeRow[] {
+  if (!workflowState || workflowState.ocr_status === 'idle' || workflowState.ocr_status === 'enabled') {
+    return []
+  }
+
+  return items.map((item) => {
+    const isCurrent = workflowState.current_item?.source_id === item.id
+    const status = workflowState.ocr_status === 'failed'
+      ? 'failed'
+      : workflowState.ocr_status === 'complete'
+        ? 'complete'
+        : isCurrent
+          ? 'running'
+          : 'pending'
+
+    return {
+      id: `ocr-${item.id}`,
+      label: `${item.display_name}.md`,
+      source_id: item.id,
+      status,
+    }
+  })
+}
+
+function ocrStageState(workflowState: WorkflowState | null, hasDiscovery: boolean): WorkflowStageState {
+  if (!hasDiscovery) {
+    return 'unavailable'
+  }
+  if (workflowState?.ocr_status === 'running') {
+    return 'running'
+  }
+  if (workflowState?.ocr_status === 'complete') {
+    return 'complete'
+  }
+  if (workflowState?.ocr_status === 'failed') {
+    return 'failed'
+  }
+  return 'enabled'
+}
+
 export default function WorkflowPanel() {
   const [selectedStage, setSelectedStage] = useState<WorkflowStageKey>('start')
   const [progressStage, setProgressStage] = useState<WorkflowStageKey>('start')
   const [stageStates, setStageStates] =
     useState<Record<WorkflowStageKey, WorkflowStageState>>(INITIAL_STAGE_STATES)
   const [discovery, setDiscovery] = useState<WorkflowDiscoveryResponse | null>(null)
+  const [workflowState, setWorkflowState] = useState<WorkflowState | null>(null)
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
   const [messages, setMessages] = useState<WorkflowStatusMessage[]>([])
   const [ocrRows, setOcrRows] = useState<OcrTreeRow[]>([])
@@ -157,11 +208,76 @@ export default function WorkflowPanel() {
     }
   }, [timerId])
 
-  const items = discovery?.items ?? []
+  useEffect(() => {
+    let cancelled = false
+    let eventSource: EventSource | null = null
+
+    function applyState(nextState: WorkflowState) {
+      if (cancelled) {
+        return
+      }
+      setWorkflowState(nextState)
+      if (nextState.discovery) {
+        setDiscovery(nextState.discovery)
+        setSelectedSourceId((current) => current ?? nextState.discovery?.items[0]?.id ?? null)
+      }
+      setMessages(nextState.messages)
+      setOcrRows(ocrRowsFromWorkflow(nextState.discovery?.items ?? [], nextState))
+    }
+
+    void fetchWorkflowState()
+      .then(applyState)
+      .catch((error) => {
+        if (!cancelled) {
+          setMessages([
+            {
+              severity: 'error',
+              code: 'state_failed',
+              message: error instanceof Error ? error.message : 'Workflow state failed.',
+            },
+          ])
+        }
+      })
+
+    eventSource = new EventSource(WORKFLOW_EVENTS_URL)
+    eventSource.addEventListener('workflow_state', (event) => {
+      try {
+        applyState(JSON.parse((event as MessageEvent).data) as WorkflowState)
+      } catch {
+        setMessages([{ severity: 'error', code: 'state_event_invalid', message: 'Workflow update could not be read.' }])
+      }
+    })
+    eventSource.onerror = () => {
+      void fetchWorkflowState().then(applyState).catch(() => undefined)
+    }
+
+    return () => {
+      cancelled = true
+      eventSource?.close()
+    }
+  }, [])
+
+  const items = discovery?.items ?? EMPTY_ITEMS
   const selectedSource =
     items.find((item) => item.id === selectedSourceId) ?? items[0] ?? null
   const metrics = discovery?.metrics ?? EMPTY_METRICS
   const hasDiscovery = discovery !== null
+  const progressPercent = workflowState?.ocr_status === 'running' || workflowState?.ocr_status === 'complete'
+    ? workflowState.progress.percent
+    : stageProgressPercent(progressStage)
+
+  useEffect(() => {
+    setStageStates((current) => ({
+      ...current,
+      start: discovery?.ok ? 'complete' : 'enabled',
+      ocr: ocrStageState(workflowState, hasDiscovery),
+      merge: workflowState?.ocr_status === 'complete'
+        ? current.merge === 'complete' ? 'complete' : 'enabled'
+        : 'unavailable',
+      rename: current.rename === 'complete' ? 'complete' : current.rename,
+    }))
+    setOcrRows(ocrRowsFromWorkflow(items, workflowState))
+  }, [discovery, hasDiscovery, items, workflowState])
 
   function clearPendingTimer() {
     if (timerId !== null) {
@@ -184,6 +300,7 @@ export default function WorkflowPanel() {
     try {
       const response = await startWorkflowDiscovery()
       setDiscovery(response)
+      setWorkflowState(null)
       setSelectedSourceId(response.items[0]?.id ?? null)
       setMessages(response.messages)
       setStageStates({
@@ -205,7 +322,39 @@ export default function WorkflowPanel() {
     }
   }
 
-  function runSimulatedStage(stage: Exclude<WorkflowStageKey, 'start'>) {
+  async function runBackendOcr() {
+    if (stageStates.ocr === 'unavailable') {
+      setMessages([nextWarning('OCR')])
+      return
+    }
+    if (workflowState?.ocr_status === 'running') {
+      return
+    }
+
+    clearPendingTimer()
+    setSelectedStage('ocr')
+    setProgressStage('ocr')
+    setStageStates((current) => ({ ...current, ocr: 'running' }))
+    setMessages([{ severity: 'info', code: 'ocr_starting', message: 'Starting OCR.' }])
+
+    try {
+      const state = await startWorkflowOcr()
+      setWorkflowState(state)
+      setMessages(state.messages)
+      setOcrRows(ocrRowsFromWorkflow(state.discovery?.items ?? items, state))
+    } catch (error) {
+      setStageStates((current) => ({ ...current, ocr: 'failed' }))
+      setMessages([
+        {
+          severity: 'error',
+          code: 'ocr_failed',
+          message: error instanceof Error ? error.message : 'OCR failed to start.',
+        },
+      ])
+    }
+  }
+
+  function runSimulatedStage(stage: Exclude<WorkflowStageKey, 'start' | 'ocr'>) {
     const label = STAGES.find((candidate) => candidate.key === stage)?.label ?? stage
     if (stageStates[stage] === 'unavailable') {
       setMessages([nextWarning(label)])
@@ -221,17 +370,6 @@ export default function WorkflowPanel() {
     setMessages([{ severity: 'info', code: `${stage}_running`, message: `${label} simulation is running.` }])
 
     const nextTimerId = window.setTimeout(() => {
-      if (stage === 'ocr') {
-        setOcrRows(
-          items.map((item) => ({
-            id: `ocr-${item.id}`,
-            label: `${item.display_name}.md`,
-            source_id: item.id,
-            status: 'simulated',
-          })),
-        )
-        setStageStates((current) => ({ ...current, ocr: 'complete', merge: 'enabled' }))
-      }
       if (stage === 'merge') {
         setMergeRows([
           {
@@ -267,6 +405,10 @@ export default function WorkflowPanel() {
       void runStart()
       return
     }
+    if (stage === 'ocr') {
+      void runBackendOcr()
+      return
+    }
     runSimulatedStage(stage)
   }
 
@@ -276,7 +418,7 @@ export default function WorkflowPanel() {
         <div className="workflow-stage-rail" aria-label="Workflow stages">
           <div
             className="workflow-stage-progress"
-            style={{ width: `${stageProgressPercent(progressStage)}%` }}
+            style={{ width: `${progressPercent}%` }}
             aria-hidden="true"
           />
           <div className="workflow-stage-grid">
@@ -288,7 +430,7 @@ export default function WorkflowPanel() {
                 stage: stage.key,
                 hasDiscovery,
                 metrics,
-                ocrRows,
+                workflowState,
                 mergeRows,
                 renameRows,
               })
@@ -332,6 +474,7 @@ export default function WorkflowPanel() {
             mergeRows={mergeRows}
             renameRows={renameRows}
             onSelectSource={setSelectedSourceId}
+            workflowState={workflowState}
           />
         </section>
         <section className="workflow-panel workflow-preview-panel">
@@ -395,6 +538,7 @@ function LeftPanel({
   mergeRows,
   renameRows,
   onSelectSource,
+  workflowState,
 }: {
   selectedStage: WorkflowStageKey
   items: WorkflowSourceFile[]
@@ -403,6 +547,7 @@ function LeftPanel({
   mergeRows: MergeRow[]
   renameRows: RenameRow[]
   onSelectSource: (id: string) => void
+  workflowState: WorkflowState | null
 }) {
   if (selectedStage === 'start') {
     if (items.length === 0) {
@@ -415,7 +560,7 @@ function LeftPanel({
             type="button"
             key={item.id}
             onClick={() => onSelectSource(item.id)}
-            className={`workflow-row ${selectedSourceId === item.id ? 'workflow-row-selected' : ''}`}
+            className={`workflow-row ${selectedSourceId === item.id ? 'workflow-row-selected' : ''} ${workflowState?.current_item?.source_id === item.id ? 'workflow-row-active-ocr' : ''} ${workflowState?.active_comparison?.left_source_id === item.id || workflowState?.active_comparison?.right_source_id === item.id ? 'workflow-row-active-comparison' : ''}`}
           >
             <span className="workflow-row-title">{item.display_name}</span>
             <span className="workflow-row-subtitle">
@@ -431,15 +576,18 @@ function LeftPanel({
     return ocrRows.length > 0 ? (
       <div className="workflow-scroll-list">
         {ocrRows.map((row) => (
-          <div key={row.id} className="workflow-tree-row">
+          <div
+            key={row.id}
+            className={`workflow-tree-row workflow-tree-row-${row.status} ${workflowState?.current_item?.source_id === row.source_id ? 'workflow-row-active-ocr' : ''}`}
+          >
             <span className="workflow-tree-branch" />
             <span className="workflow-row-title">{row.label}</span>
-            <span className="workflow-row-subtitle">OCR placeholder</span>
+            <span className="workflow-row-subtitle">{row.status}</span>
           </div>
         ))}
       </div>
     ) : (
-      <EmptyPanel text="OCR rows will appear after the placeholder stage runs." />
+      <EmptyPanel text="OCR rows will appear after OCR starts." />
     )
   }
 

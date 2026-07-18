@@ -2,10 +2,12 @@ import type {
   AppSettings,
   ValidationError,
   WorkflowDiscoveryResponse,
+  WorkflowState,
   WorkflowSourceFile,
 } from './types'
 
 const API_BASE = ''
+export const WORKFLOW_EVENTS_URL = `${API_BASE}/api/workflow/events`
 
 export async function fetchSettings(): Promise<AppSettings> {
   const response = await fetch(`${API_BASE}/api/settings`)
@@ -59,6 +61,30 @@ export async function startWorkflowDiscovery(): Promise<WorkflowDiscoveryRespons
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.detail || `Workflow start failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export async function startWorkflowOcr(): Promise<WorkflowState> {
+  const response = await fetch(`${API_BASE}/api/workflow/ocr`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Workflow OCR failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export async function fetchWorkflowState(): Promise<WorkflowState> {
+  const response = await fetch(`${API_BASE}/api/workflow/state`)
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Workflow state failed (${response.status})`)
   }
 
   return response.json()

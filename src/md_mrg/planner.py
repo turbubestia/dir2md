@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from common.config import AppConfig
 from common.gateway import GatewayError, LlamaLanguageGateway, TextRequest
@@ -11,6 +12,35 @@ from common.gateway import GatewayError, LlamaLanguageGateway, TextRequest
 BATCH_FILE_NAME = "batch.json"
 MERGE_PLAN_FILE_NAME = "batch_mrg.json"
 SCORE_THRESHOLD = 5.0
+
+PlanningProgressKind = Literal[
+    "plan_start",
+    "comparison_start",
+    "comparison_complete",
+    "plan_persisted",
+    "complete",
+    "failed",
+]
+
+
+@dataclass(frozen=True)
+class PlanningProgressEvent:
+    kind: PlanningProgressKind
+    total_comparisons: int = 0
+    completed_comparisons: int = 0
+    left_source_id: str | None = None
+    right_source_id: str | None = None
+    left_display_name: str | None = None
+    right_display_name: str | None = None
+    score_status: str | None = None
+    score: float | None = None
+    pdf_document_count: int = 0
+    image_group_count: int = 0
+    error_code: str | None = None
+    message: str | None = None
+
+
+PlanningProgressCallback = Callable[[PlanningProgressEvent], None]
 
 
 class PlannerError(RuntimeError):
@@ -148,17 +178,44 @@ def _as_group(documents: list[dict[str, Any]]) -> dict[str, Any]:
     return {"documents": documents}
 
 
+def _emit_progress(
+    progress_callback: PlanningProgressCallback | None,
+    event: PlanningProgressEvent,
+) -> None:
+    if progress_callback is not None:
+        progress_callback(event)
+
+
+def _document_id(document: dict[str, Any]) -> str | None:
+    source_file_name = document.get("source_file_name")
+    if isinstance(source_file_name, str) and source_file_name:
+        return source_file_name
+    markdown_file = document.get("markdown_file")
+    if isinstance(markdown_file, str) and markdown_file:
+        return markdown_file
+    return None
+
+
+def _display_name(document: dict[str, Any]) -> str:
+    return _document_id(document) or "<unknown>"
+
+
 def _build_groups(
     source_dir: Path,
     gateway: LlamaLanguageGateway,
     score_prompt: str,
     image_documents: list[dict[str, Any]],
+    *,
+    progress_callback: PlanningProgressCallback | None = None,
+    total_comparisons: int = 0,
+    pdf_document_count: int = 0,
 ) -> list[dict[str, Any]]:
     if not image_documents:
         return []
 
     groups: list[list[dict[str, Any]]] = []
     current_group: list[dict[str, Any]] = [image_documents[0]]
+    completed_comparisons = 0
 
     left_index = 0
     right_index = 1
@@ -166,9 +223,38 @@ def _build_groups(
     while right_index < len(image_documents):
         page_a = image_documents[left_index]
         page_b = image_documents[right_index]
+        file_name_a = _display_name(page_a)
+        file_name_b = _display_name(page_b)
+        _emit_progress(
+            progress_callback,
+            PlanningProgressEvent(
+                kind="comparison_start",
+                total_comparisons=total_comparisons,
+                completed_comparisons=completed_comparisons,
+                left_source_id=_document_id(page_a),
+                right_source_id=_document_id(page_b),
+                left_display_name=file_name_a,
+                right_display_name=file_name_b,
+                pdf_document_count=pdf_document_count,
+            ),
+        )
         score_outcome = _score_pair(source_dir, gateway, score_prompt, page_a, page_b)
-        file_name_a = page_a.get("source_file_name", page_a.get("markdown_file", "<unknown>"))
-        file_name_b = page_b.get("source_file_name", page_b.get("markdown_file", "<unknown>"))
+        completed_comparisons += 1
+        _emit_progress(
+            progress_callback,
+            PlanningProgressEvent(
+                kind="comparison_complete",
+                total_comparisons=total_comparisons,
+                completed_comparisons=completed_comparisons,
+                left_source_id=_document_id(page_a),
+                right_source_id=_document_id(page_b),
+                left_display_name=file_name_a,
+                right_display_name=file_name_b,
+                score_status="failed" if score_outcome.score is None else "scored",
+                score=score_outcome.score,
+                pdf_document_count=pdf_document_count,
+            ),
+        )
         print(
             f"{file_name_a} <=> {file_name_b} == {score_outcome.score} "
             # f"response={score_outcome.response_text!r}"
@@ -203,35 +289,81 @@ def _build_groups(
     return [_as_group(group) for group in groups]
 
 
-def run_plan(source_dir: Path, cfg: AppConfig) -> dict[str, Any]:
+def run_plan(
+    source_dir: Path,
+    cfg: AppConfig,
+    *,
+    progress_callback: PlanningProgressCallback | None = None,
+) -> dict[str, Any]:
     batch_path = source_dir / BATCH_FILE_NAME
     plan_path = source_dir / MERGE_PLAN_FILE_NAME
 
-    if not batch_path.exists():
-        raise PlannerError("batch_file_not_found", f"Input batch file does not exist: {batch_path}")
+    try:
+        if not batch_path.exists():
+            raise PlannerError("batch_file_not_found", f"Input batch file does not exist: {batch_path}")
 
-    payload = _read_json_file(batch_path)
-    documents = _validate_document_list(payload, "batch")
-    image_documents, pdf_documents = _partition_documents(documents)
-
-    with LlamaLanguageGateway(
-        endpoint_url=cfg.language_model.endpoint_url,
-        model_name=cfg.language_model.model_name,
-    ) as gateway:
-        gateway.request_timeout_seconds = cfg.language_model.request_timeout_seconds
-        gateway.request_max_retries = cfg.language_model.request_max_retries
-        groups = _build_groups(
-            source_dir=source_dir,
-            gateway=gateway,
-            score_prompt=cfg.md_mrg.score.summary_prompt_text,
-            image_documents=image_documents,
+        payload = _read_json_file(batch_path)
+        documents = _validate_document_list(payload, "batch")
+        image_documents, pdf_documents = _partition_documents(documents)
+        total_comparisons = max(len(image_documents) - 1, 0)
+        pdf_document_count = len(pdf_documents)
+        _emit_progress(
+            progress_callback,
+            PlanningProgressEvent(
+                kind="plan_start",
+                total_comparisons=total_comparisons,
+                pdf_document_count=pdf_document_count,
+            ),
         )
 
-    merged_documents: list[dict[str, Any]] = []
-    merged_documents.extend(groups)
-    merged_documents.extend(pdf_documents)
+        with LlamaLanguageGateway(
+            endpoint_url=cfg.language_model.endpoint_url,
+            model_name=cfg.language_model.model_name,
+        ) as gateway:
+            gateway.request_timeout_seconds = cfg.language_model.request_timeout_seconds
+            gateway.request_max_retries = cfg.language_model.request_max_retries
+            groups = _build_groups(
+                source_dir=source_dir,
+                gateway=gateway,
+                score_prompt=cfg.md_mrg.score.summary_prompt_text,
+                image_documents=image_documents,
+                progress_callback=progress_callback,
+                total_comparisons=total_comparisons,
+                pdf_document_count=pdf_document_count,
+            )
 
-    output_payload = {"documents": merged_documents}
-    plan_path.write_text(json.dumps(output_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        image_group_count = len(groups)
+        merged_documents: list[dict[str, Any]] = []
+        merged_documents.extend(groups)
+        merged_documents.extend(pdf_documents)
 
-    return output_payload
+        output_payload = {"documents": merged_documents}
+        plan_path.write_text(json.dumps(output_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _emit_progress(
+            progress_callback,
+            PlanningProgressEvent(
+                kind="plan_persisted",
+                total_comparisons=total_comparisons,
+                completed_comparisons=total_comparisons,
+                pdf_document_count=pdf_document_count,
+                image_group_count=image_group_count,
+            ),
+        )
+        _emit_progress(
+            progress_callback,
+            PlanningProgressEvent(
+                kind="complete",
+                total_comparisons=total_comparisons,
+                completed_comparisons=total_comparisons,
+                pdf_document_count=pdf_document_count,
+                image_group_count=image_group_count,
+            ),
+        )
+
+        return output_payload
+    except PlannerError as exc:
+        _emit_progress(
+            progress_callback,
+            PlanningProgressEvent(kind="failed", error_code=exc.error_code, message=str(exc)),
+        )
+        raise

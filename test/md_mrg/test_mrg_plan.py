@@ -128,6 +128,47 @@ def test_planner_groups_images_and_appends_pdf_records(
     assert plan_file_payload == out
 
 
+def test_planner_emits_comparison_progress_and_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    images = [_doc("scan-1.jpg"), _doc("scan-2.jpg")]
+    pdfs = [_doc("report.pdf", file_type="pdf")]
+    _write_batch(source_dir, images + pdfs)
+    _write_markdowns(source_dir, images + pdfs)
+    events = []
+
+    class FakeGateway:
+        def __init__(self, endpoint_url: str, model_name: str):
+            self.request_timeout_seconds = 0.0
+            self.request_max_retries = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def send_text_request(self, request):
+            return TextResponse(model_name="m", text='{"score": 7}', raw_response={})
+
+    monkeypatch.setattr(planner_mod, "LlamaLanguageGateway", FakeGateway)
+
+    planner_mod.run_plan(source_dir=source_dir, cfg=_cfg(source_dir), progress_callback=events.append)
+
+    assert [event.kind for event in events] == [
+        "plan_start",
+        "comparison_start",
+        "comparison_complete",
+        "plan_persisted",
+        "complete",
+    ]
+    assert events[0].total_comparisons == 1
+    assert events[0].pdf_document_count == 1
+    assert events[1].left_display_name == "scan-1.jpg"
+    assert events[2].completed_comparisons == 1
+    assert events[-1].image_group_count == 1
+
+
 def test_planner_reorders_group_when_score_is_negative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source_dir = tmp_path / "out"
     source_dir.mkdir()

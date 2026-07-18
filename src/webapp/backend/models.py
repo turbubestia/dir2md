@@ -22,6 +22,7 @@ FolderStatusKind = Literal[
     "ready",
 ]
 WorkflowMessageSeverity = Literal["info", "success", "warning", "error"]
+WorkflowStageStatus = Literal["idle", "enabled", "running", "complete", "failed"]
 
 
 class WorkflowStatusMessage(BaseModel):
@@ -61,6 +62,45 @@ class WorkflowDiscoveryResponse(BaseModel):
     metrics: WorkflowMetrics
     items: list[WorkflowSourceFile]
     messages: list[WorkflowStatusMessage]
+
+
+class WorkflowActiveItem(BaseModel):
+    source_id: str | None = None
+    display_name: str | None = None
+    source_type: SourceFileType | None = None
+    page_number: int | None = None
+    markdown_file: str | None = None
+
+
+class WorkflowActiveComparison(BaseModel):
+    left_source_id: str | None = None
+    right_source_id: str | None = None
+    left_display_name: str | None = None
+    right_display_name: str | None = None
+
+
+class WorkflowCounts(BaseModel):
+    markdown_count: int = 0
+    pdf_document_count: int = 0
+    image_group_count: int = 0
+
+
+class WorkflowProgress(BaseModel):
+    stage: Literal["idle", "ocr", "planning"] = "idle"
+    total_jobs: int = 0
+    completed_jobs: int = 0
+    percent: float = 0.0
+
+
+class WorkflowState(BaseModel):
+    discovery: WorkflowDiscoveryResponse | None = None
+    ocr_status: WorkflowStageStatus = "idle"
+    progress: WorkflowProgress = Field(default_factory=WorkflowProgress)
+    counts: WorkflowCounts = Field(default_factory=WorkflowCounts)
+    current_item: WorkflowActiveItem | None = None
+    active_comparison: WorkflowActiveComparison | None = None
+    messages: list[WorkflowStatusMessage] = Field(default_factory=list)
+    error: WorkflowStatusMessage | None = None
 
 
 class ModelEndpointSettings(BaseModel):

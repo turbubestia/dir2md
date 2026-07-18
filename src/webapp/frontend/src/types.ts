@@ -52,8 +52,10 @@ export type WorkflowStageState =
   | 'enabled'
   | 'running'
   | 'complete'
+  | 'failed'
   | 'selected'
 export type WorkflowStatusSeverity = 'info' | 'success' | 'warning' | 'error'
+export type WorkflowStageStatus = 'idle' | 'enabled' | 'running' | 'complete' | 'failed'
 export type SourceFileType = 'pdf' | 'image'
 export type FolderStatusKind =
   | 'not_configured'
@@ -102,10 +104,49 @@ export interface WorkflowDiscoveryResponse {
   messages: WorkflowStatusMessage[]
 }
 
+export interface WorkflowActiveItem {
+  source_id: string | null
+  display_name: string | null
+  source_type: SourceFileType | null
+  page_number: number | null
+  markdown_file: string | null
+}
+
+export interface WorkflowActiveComparison {
+  left_source_id: string | null
+  right_source_id: string | null
+  left_display_name: string | null
+  right_display_name: string | null
+}
+
+export interface WorkflowCounts {
+  markdown_count: number
+  pdf_document_count: number
+  image_group_count: number
+}
+
+export interface WorkflowProgress {
+  stage: 'idle' | 'ocr' | 'planning'
+  total_jobs: number
+  completed_jobs: number
+  percent: number
+}
+
+export interface WorkflowState {
+  discovery: WorkflowDiscoveryResponse | null
+  ocr_status: WorkflowStageStatus
+  progress: WorkflowProgress
+  counts: WorkflowCounts
+  current_item: WorkflowActiveItem | null
+  active_comparison: WorkflowActiveComparison | null
+  messages: WorkflowStatusMessage[]
+  error: WorkflowStatusMessage | null
+}
+
 export interface OcrTreeRow {
   id: string
   label: string
-  status: 'pending' | 'simulated'
+  status: 'pending' | 'running' | 'complete' | 'failed'
   source_id: string
 }
 
