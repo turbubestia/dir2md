@@ -66,6 +66,11 @@
     height: 0.8rem;
   }
 
+  .workflow-stage-progress {
+    @apply absolute left-0 top-[1.05rem] z-[1] bg-accent-dim transition-[width] duration-700 ease-out;
+    height: 0.8rem;
+  }
+
   .workflow-stage-grid {
     @apply relative z-10 grid grid-cols-4 gap-0;
   }

@@ -111,8 +111,17 @@ function stageButtonFillClass(state: WorkflowStageState): string {
   return 'bg-sky-200 border-sky-200 text-slate-950'
 }
 
+function stageProgressPercent(stage: WorkflowStageKey): number {
+  const stageIndex = STAGES.findIndex((candidate) => candidate.key === stage)
+  if (stageIndex <= 0) {
+    return 0
+  }
+  return (stageIndex / (STAGES.length - 1)) * 100
+}
+
 export default function WorkflowPanel() {
   const [selectedStage, setSelectedStage] = useState<WorkflowStageKey>('start')
+  const [progressStage, setProgressStage] = useState<WorkflowStageKey>('start')
   const [stageStates, setStageStates] =
     useState<Record<WorkflowStageKey, WorkflowStageState>>(INITIAL_STAGE_STATES)
   const [discovery, setDiscovery] = useState<WorkflowDiscoveryResponse | null>(null)
@@ -147,6 +156,7 @@ export default function WorkflowPanel() {
   async function runStart() {
     clearPendingTimer()
     setSelectedStage('start')
+    setProgressStage('start')
     setStageStates({ ...INITIAL_STAGE_STATES, start: 'running' })
     setOcrRows([])
     setMergeRows([])
@@ -235,6 +245,7 @@ export default function WorkflowPanel() {
   }
 
   function handleStageClick(stage: WorkflowStageKey) {
+    setProgressStage(stage)
     if (stage === 'start') {
       void runStart()
       return
@@ -246,6 +257,11 @@ export default function WorkflowPanel() {
     <section className="workflow-root">
       <div className="workflow-toolbar">
         <div className="workflow-stage-rail" aria-label="Workflow stages">
+          <div
+            className="workflow-stage-progress"
+            style={{ width: `${stageProgressPercent(progressStage)}%` }}
+            aria-hidden="true"
+          />
           <div className="workflow-stage-grid">
             {STAGES.map((stage, index) => {
               const state = selectedStage === stage.key ? 'selected' : stageStates[stage.key]
