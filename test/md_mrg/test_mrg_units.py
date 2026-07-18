@@ -159,6 +159,83 @@ def test_apply_continues_after_failed_group(tmp_path: Path) -> None:
     assert (source_dir / "merger-002.md").exists()
 
 
+def test_apply_accepts_reordered_singleton_and_multiple_image_groups(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    page_a = _write_image_and_markdown(source_dir, "page-a", "Page A")
+    page_b = _write_image_and_markdown(source_dir, "page-b", "Page B")
+    page_c = _write_image_and_markdown(source_dir, "page-c", "Page C")
+
+    (source_dir / "batch_mrg.json").write_text(
+        json.dumps(
+            {
+                "documents": [
+                    {"documents": [page_b, page_a]},
+                    {"documents": [page_c]},
+                ]
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert [item["status"] for item in payload["items"]] == ["ok", "ok"]
+    assert payload["items"][0]["documents"] == [page_b, page_a]
+    assert payload["items"][1]["documents"] == [page_c]
+    assert (source_dir / "merged-001.pdf").exists()
+    assert (source_dir / "merged-002.pdf").exists()
+
+
+def test_apply_preserves_mixed_pdf_group_order(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    page_a = _write_image_and_markdown(source_dir, "page-a", "Page A")
+    page_b = _write_image_and_markdown(source_dir, "page-b", "Page B")
+    pdf_doc = {
+        "source_file_name": "report.pdf",
+        "file_type": "pdf",
+        "page_count": 3,
+        "date_of_process": "2026-07-14T08:21:54.244888+00:00",
+        "summary": "report",
+        "markdown_file": "report.md",
+        "status": "ok",
+    }
+    (source_dir / "report.pdf").write_bytes(b"%PDF-1.4")
+    (source_dir / "report.md").write_text("Report", encoding="utf-8")
+    (source_dir / "batch_mrg.json").write_text(
+        json.dumps({"documents": [pdf_doc, {"documents": [page_a]}, {"documents": [page_b]}]}, indent=2),
+        encoding="utf-8",
+    )
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert [item["item_type"] for item in payload["items"]] == ["pdf", "group", "group"]
+    assert payload["items"][0]["document"] == pdf_doc
+    assert payload["items"][1]["documents"] == [page_a]
+    assert payload["items"][2]["documents"] == [page_b]
+
+
+def test_apply_reports_empty_group_image_failure(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    (source_dir / "batch_mrg.json").write_text(json.dumps({"documents": [{"documents": []}]}), encoding="utf-8")
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert payload["items"] == [
+        {
+            "item_index": 1,
+            "item_type": "group",
+            "status": "failed",
+            "error_code": "group_image_empty",
+            "message": "Cannot merge an empty image group",
+            "documents": [],
+        }
+    ]
+
+
 def test_apply_raises_for_missing_plan_file(tmp_path: Path) -> None:
     source_dir = tmp_path / "out"
     source_dir.mkdir()

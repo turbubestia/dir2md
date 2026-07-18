@@ -84,6 +84,42 @@ def _encoded_id(relative_path: str) -> str:
     return base64.urlsafe_b64encode(relative_path.encode("utf-8")).decode("ascii").rstrip("=")
 
 
+def _artifact_id(source_file_name: str, markdown_file: str) -> str:
+    raw = json.dumps([source_file_name, markdown_file], separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _image_doc(stem: str, **extra) -> dict:
+    return {
+        "source_file_name": f"{stem}.png",
+        "file_type": "image",
+        "markdown_file": f"{stem}.md",
+        "page_count": 1,
+        "date_of_process": "2026-07-18T00:00:00+00:00",
+        "summary": f"Summary {stem}",
+        "status": "ok",
+        **extra,
+    }
+
+
+def _pdf_doc(stem: str, **extra) -> dict:
+    return {
+        "source_file_name": f"{stem}.pdf",
+        "file_type": "pdf",
+        "markdown_file": f"{stem}.md",
+        "page_count": 3,
+        "date_of_process": "2026-07-18T00:00:00+00:00",
+        "summary": f"Summary {stem}",
+        "status": "ok",
+        **extra,
+    }
+
+
+def _write_merge_plan(output: Path, documents: list[dict]) -> None:
+    output.mkdir(exist_ok=True)
+    (output / "batch_mrg.json").write_text(json.dumps({"documents": documents}, indent=2), encoding="utf-8")
+
+
 def test_start_discovers_supported_sources_in_natural_order(workflow_paths, tmp_path: Path):
     settings_path, defaults_path = workflow_paths
     source = tmp_path / "source"
@@ -254,6 +290,165 @@ def test_preview_rejects_unsupported_traversal_outside_and_missing(
         assert b"secret text" not in response.content
 
 
+def test_merge_plan_loads_editable_groups_pdfs_and_metadata(workflow_paths, tmp_path: Path):
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    first = _image_doc("page-1", confidence=0.92)
+    second = _image_doc("page-2")
+    pdf = _pdf_doc("report", category="invoice")
+    _write_merge_plan(output, [{"documents": [first, second]}, pdf])
+    _write_settings(settings_path, source, output)
+
+    response = _client(settings_path, defaults_path).get("/api/workflow/merge-plan")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [item["kind"] for item in data["items"]] == ["image_group", "pdf"]
+    assert data["items"][0]["id"] == "group-1"
+    assert data["items"][0]["display_name"] == "DocumentGroup_1"
+    assert [document["kind"] for document in data["items"][0]["documents"]] == ["image_page", "image_page"]
+    assert data["items"][0]["documents"][0]["confidence"] == 0.92
+    assert data["items"][1]["category"] == "invoice"
+
+
+def test_merge_plan_reports_missing_and_malformed_files(workflow_paths, tmp_path: Path):
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    _write_settings(settings_path, source, output)
+    client = _client(settings_path, defaults_path)
+
+    assert client.get("/api/workflow/merge-plan").status_code == 404
+
+    (output / "batch_mrg.json").write_text(json.dumps({"documents": [{"documents": []}]}), encoding="utf-8")
+    malformed = client.get("/api/workflow/merge-plan")
+
+    assert malformed.status_code == 400
+
+
+def test_merge_plan_save_reorders_moves_and_omits_ui_fields(workflow_paths, tmp_path: Path):
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    first = _image_doc("page-1", confidence=0.92)
+    second = _image_doc("page-2")
+    third = _image_doc("page-3")
+    pdf = _pdf_doc("report")
+    _write_merge_plan(output, [{"documents": [first, second]}, pdf, {"documents": [third]}])
+    _write_settings(settings_path, source, output)
+    client = _client(settings_path, defaults_path)
+    plan = client.get("/api/workflow/merge-plan").json()
+    first_group = plan["items"][0]
+    pdf_item = plan["items"][1]
+    second_group = plan["items"][2]
+    moved_page = first_group["documents"].pop(1)
+    second_group["documents"].insert(0, moved_page)
+    new_group = {
+        "id": "group-new",
+        "kind": "image_group",
+        "display_name": "DocumentGroup_New",
+        "documents": [first_group["documents"].pop(0)],
+    }
+    plan["items"] = [pdf_item, second_group, new_group]
+
+    response = client.put("/api/workflow/merge-plan", json=plan)
+
+    assert response.status_code == 200
+    saved = json.loads((output / "batch_mrg.json").read_text(encoding="utf-8"))
+    assert saved["documents"][0]["source_file_name"] == "report.pdf"
+    assert [document["source_file_name"] for document in saved["documents"][1]["documents"]] == ["page-2.png", "page-3.png"]
+    assert [document["source_file_name"] for document in saved["documents"][2]["documents"]] == ["page-1.png"]
+    serialized = json.dumps(saved)
+    assert "image_group" not in serialized
+    assert "display_name" not in serialized
+    assert "group-new" not in serialized
+    assert saved["documents"][2]["documents"][0]["confidence"] == 0.92
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda plan: plan["items"].__setitem__(0, {**plan["items"][0], "documents": []}),
+        lambda plan: plan["items"][0]["documents"].__setitem__(1, {**plan["items"][0]["documents"][1], "id": plan["items"][0]["documents"][0]["id"]}),
+        lambda plan: plan["items"][0]["documents"].__setitem__(0, {**plan["items"][1], "kind": "pdf"}),
+        lambda plan: plan["items"].append({**plan["items"][0]["documents"][0], "kind": "image_page"}),
+    ],
+)
+def test_merge_plan_save_rejects_invalid_payloads_without_mutating_file(workflow_paths, tmp_path: Path, mutate):
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    _write_merge_plan(output, [{"documents": [_image_doc("page-1"), _image_doc("page-2")]}, _pdf_doc("report")])
+    original = (output / "batch_mrg.json").read_text(encoding="utf-8")
+    _write_settings(settings_path, source, output)
+    client = _client(settings_path, defaults_path)
+    plan = client.get("/api/workflow/merge-plan").json()
+    mutate(plan)
+
+    response = client.put("/api/workflow/merge-plan", json=plan)
+
+    assert response.status_code == 400
+    assert (output / "batch_mrg.json").read_text(encoding="utf-8") == original
+
+
+def test_ocr_previews_use_source_files_and_markdown_uses_output_files(workflow_paths, tmp_path: Path):
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    image_doc = _image_doc("page-1")
+    pdf_doc = _pdf_doc("report")
+    _write_merge_plan(output, [{"documents": [image_doc]}, pdf_doc])
+    (source / "page-1.png").write_bytes(b"image bytes")
+    (output / "page-1.md").write_text("# Page 1", encoding="utf-8")
+    (source / "report.pdf").write_bytes(b"%PDF-1.4")
+    (output / "report.md").write_text("# Report", encoding="utf-8")
+    _write_settings(settings_path, source, output)
+    client = _client(settings_path, defaults_path)
+
+    image_id = _artifact_id("page-1.png", "page-1.md")
+    pdf_id = _artifact_id("report.pdf", "report.md")
+    image_preview = client.get(f"/api/workflow/ocr-preview/{image_id}")
+    pdf_preview = client.get(f"/api/workflow/ocr-preview/{pdf_id}")
+    markdown_preview = client.get(f"/api/workflow/markdown-preview/{image_id}")
+
+    assert image_preview.status_code == 200
+    assert image_preview.content == b"image bytes"
+    assert pdf_preview.status_code == 200
+    assert pdf_preview.content == b"%PDF-1.4"
+    assert markdown_preview.status_code == 200
+    assert markdown_preview.json() == {"id": image_id, "markdown_file": "page-1.md", "content": "# Page 1"}
+
+    (source / "page-1.png").unlink()
+    assert client.get(f"/api/workflow/ocr-preview/{image_id}").status_code == 404
+
+
+def test_ocr_preview_rejects_traversal_artifact_paths(workflow_paths, tmp_path: Path):
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    _write_merge_plan(output, [{"documents": [_image_doc("page-1", source_file_name="../outside.png")]}])
+    _write_settings(settings_path, source, output)
+
+    response = _client(settings_path, defaults_path).get(
+        f"/api/workflow/ocr-preview/{_artifact_id('../outside.png', 'page-1.md')}"
+    )
+
+    assert response.status_code == 400
+
+
 def test_workflow_state_is_idle_before_start(workflow_paths) -> None:
     settings_path, defaults_path = workflow_paths
 
@@ -305,7 +500,10 @@ def test_ocr_runs_generation_then_planning_and_updates_state(workflow_paths, tmp
             progress_callback(PlanningProgressEvent(kind="comparison_start", total_comparisons=1, left_display_name="scan-1.png", right_display_name="scan-2.png", pdf_document_count=1))
             progress_callback(PlanningProgressEvent(kind="comparison_complete", total_comparisons=1, completed_comparisons=1, left_display_name="scan-1.png", right_display_name="scan-2.png", score_status="scored", score=7, pdf_document_count=1))
             progress_callback(PlanningProgressEvent(kind="plan_persisted", total_comparisons=1, completed_comparisons=1, pdf_document_count=1, image_group_count=1))
-        payload = {"documents": [{"documents": []}, {"source_file_name": "report.pdf", "file_type": "pdf"}]}
+        payload = {"documents": [
+            {"documents": [{"source_file_name": "scan-1.png", "file_type": "image", "markdown_file": "scan-1.md"}]},
+            {"source_file_name": "report.pdf", "file_type": "pdf", "markdown_file": "report.md"},
+        ]}
         (output / "batch_mrg.json").write_text(json.dumps(payload), encoding="utf-8")
         return payload
 

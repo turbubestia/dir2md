@@ -1,5 +1,9 @@
 import type {
   AppSettings,
+  EditableImagePage,
+  EditableMergePlan,
+  EditablePdfDocument,
+  MarkdownPreviewResponse,
   ValidationError,
   WorkflowDiscoveryResponse,
   WorkflowState,
@@ -90,8 +94,55 @@ export async function fetchWorkflowState(): Promise<WorkflowState> {
   return response.json()
 }
 
+export async function fetchEditableMergePlan(): Promise<EditableMergePlan> {
+  const response = await fetch(`${API_BASE}/api/workflow/merge-plan`)
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Merge plan load failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export async function saveEditableMergePlan(
+  plan: EditableMergePlan,
+): Promise<EditableMergePlan> {
+  const response = await fetch(`${API_BASE}/api/workflow/merge-plan`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(plan),
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Merge plan save failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
 export function buildSourcePreviewUrl(
   item: WorkflowSourceFile,
 ): string | undefined {
   return item.preview_url ?? undefined
+}
+
+export function buildOcrArtifactPreviewUrl(
+  item: EditableImagePage | EditablePdfDocument,
+): string {
+  return `${API_BASE}/api/workflow/ocr-preview/${encodeURIComponent(item.id)}`
+}
+
+export async function fetchMarkdownPreview(
+  item: EditableImagePage | EditablePdfDocument,
+): Promise<MarkdownPreviewResponse> {
+  const response = await fetch(`${API_BASE}/api/workflow/markdown-preview/${encodeURIComponent(item.id)}`)
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Markdown preview failed (${response.status})`)
+  }
+
+  return response.json()
 }

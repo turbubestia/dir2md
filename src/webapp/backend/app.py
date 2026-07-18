@@ -14,8 +14,9 @@ from typing import Sequence
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from pydantic import ValidationError
 
-from .models import AppSettings, WorkflowDiscoveryResponse, WorkflowState
+from .models import AppSettings, EditableMergePlan, MarkdownPreviewResponse, WorkflowDiscoveryResponse, WorkflowState
 from .settings_store import (
     DEFAULT_SETTINGS_FILE,
     SETTINGS_FILE,
@@ -115,6 +116,44 @@ def create_app(
     def get_workflow_state() -> WorkflowState:
         return workflow_service.get_state()
 
+    @application.get("/api/workflow/merge-plan")
+    def get_workflow_merge_plan() -> EditableMergePlan:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            return workflow_service.get_editable_merge_plan(settings)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.put("/api/workflow/merge-plan")
+    def put_workflow_merge_plan(payload: dict) -> EditableMergePlan:
+        try:
+            plan = EditableMergePlan.model_validate(payload)
+            settings = load_settings(settings_path, defaults_path)
+            return workflow_service.save_editable_merge_plan(settings, plan)
+        except ValidationError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": exc.errors(include_context=False)},
+            )  # type: ignore[return-value]
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
     @application.get("/api/workflow/events")
     def get_workflow_events(once: bool = False) -> StreamingResponse:
         subscriber = workflow_service.subscribe()
@@ -141,6 +180,39 @@ def create_app(
             settings = load_settings(settings_path, defaults_path)
             path = workflow_service.resolve_preview_path(settings, file_id)
             return FileResponse(path)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/workflow/ocr-preview/{artifact_id}")
+    def get_ocr_preview(artifact_id: str) -> FileResponse:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            path = workflow_service.resolve_ocr_artifact_preview_path(settings, artifact_id)
+            return FileResponse(path)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/workflow/markdown-preview/{artifact_id}")
+    def get_markdown_preview(artifact_id: str) -> MarkdownPreviewResponse:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            return workflow_service.get_markdown_preview(settings, artifact_id)
         except SettingsStoreError as exc:
             return JSONResponse(
                 status_code=500,

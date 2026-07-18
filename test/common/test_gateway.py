@@ -121,7 +121,7 @@ def test_build_text_summary_payload_uses_system_and_user_messages() -> None:
         assert payload["messages"][0]["role"] == "system"
         assert payload["messages"][1]["role"] == "user"
         assert payload["messages"][1]["content"] == "OCR markdown output"
-        assert payload["temperature"] == 0
+        assert payload["temperature"] == 0.8
 
 
 def test_language_gateway_keeps_generic_text_response() -> None:

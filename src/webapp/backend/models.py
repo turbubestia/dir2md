@@ -7,9 +7,9 @@ browser UI can load and save the shared configuration file without reshaping it.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, Field, NonNegativeInt, PositiveFloat
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, NonNegativeInt, PositiveFloat, model_validator
 
 
 SourceFileType = Literal["pdf", "image"]
@@ -102,6 +102,62 @@ class WorkflowState(BaseModel):
     completed_item_ids: list[str] = Field(default_factory=list)
     messages: list[WorkflowStatusMessage] = Field(default_factory=list)
     error: WorkflowStatusMessage | None = None
+
+
+class EditablePlanDocumentBase(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(..., min_length=1)
+    source_file_name: str = Field(..., min_length=1)
+    file_type: SourceFileType
+    markdown_file: str = Field(..., min_length=1)
+    page_count: int | None = None
+    date_of_process: str | None = None
+    summary: str | None = None
+    status: str | None = None
+
+
+class EditableImagePage(EditablePlanDocumentBase):
+    kind: Literal["image_page"] = "image_page"
+    file_type: Literal["image"] = "image"
+
+
+class EditablePdfDocument(EditablePlanDocumentBase):
+    kind: Literal["pdf"] = "pdf"
+    file_type: Literal["pdf"] = "pdf"
+
+
+class EditableImageGroup(BaseModel):
+    id: str = Field(..., min_length=1)
+    kind: Literal["image_group"] = "image_group"
+    display_name: str = Field(..., min_length=1)
+    documents: list[EditableImagePage] = Field(..., min_length=1)
+
+
+EditablePlanItem = EditableImageGroup | EditablePdfDocument
+
+
+class EditableMergePlan(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    items: list[EditablePlanItem]
+
+    @model_validator(mode="after")
+    def reject_duplicate_document_ids(self) -> "EditableMergePlan":
+        seen: set[str] = set()
+        for item in self.items:
+            documents = item.documents if isinstance(item, EditableImageGroup) else [item]
+            for document in documents:
+                if document.id in seen:
+                    raise ValueError(f"Duplicate editable plan document id: {document.id}")
+                seen.add(document.id)
+        return self
+
+
+class MarkdownPreviewResponse(BaseModel):
+    id: str
+    markdown_file: str
+    content: str
 
 
 class ModelEndpointSettings(BaseModel):

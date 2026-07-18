@@ -1,9 +1,9 @@
 # dir2md Webapp
 
-This directory contains the local-first webapp scaffold for dir2md. It is
-intentionally limited to a single-window UI shell, Settings editor, Start
-discovery workflow, and local-only placeholder stages in this phase. OCR, merge,
-rename, and `batch_mrg.json` persistence are deferred to later phases.
+This directory contains the local-first webapp scaffold for dir2md. It includes
+a single-window UI shell, Settings editor, Start discovery workflow, wired OCR
+execution, editable `batch_mrg.json` loading/saving, and local preview routes.
+Actual `md_mrg.cli --apply` execution and rename remain deferred.
 
 ## Layout
 
@@ -12,7 +12,7 @@ src/webapp/
 ├── backend/          FastAPI settings and workflow discovery API
 │   ├── app.py        FastAPI application factory and routes
 │   ├── models.py     Pydantic settings and workflow schemas
-│   ├── workflow.py   Start discovery and source preview validation
+│   ├── workflow.py   Discovery, OCR, editable merge-plan, and preview validation
 │   └── settings_store.py   Atomic read/write for data/config/settings.json
 └── frontend/         React + Vite + Tailwind browser UI
     ├── src/
@@ -39,10 +39,23 @@ src/webapp/
 - `GET /api/workflow/source-preview/{file_id}` streams a validated image source
     file from the current configured source folder. Preview ids are checked
     against the current discovery result before bytes are returned.
+- `POST /api/workflow/ocr` runs OCR generation and merge planning using the
+    configured local folders and model endpoints.
+- `GET /api/workflow/state` returns the current workflow state.
+- `GET /api/workflow/events` streams workflow state changes as server-sent
+    events.
+- `GET /api/workflow/merge-plan` loads `batch_mrg.json` from the configured
+    output folder and returns the editable OCR tree shape.
+- `PUT /api/workflow/merge-plan` validates and saves an edited OCR tree back to
+    the apply-compatible `batch_mrg.json` shape.
+- `GET /api/workflow/ocr-preview/{artifact_id}` streams the selected source
+    image or PDF referenced by the editable OCR plan.
+- `GET /api/workflow/markdown-preview/{artifact_id}` returns UTF-8 Markdown
+    content for a selected generated OCR artifact.
 
-PDF preview is metadata-only in this phase. The OCR, Merge, and Rename stages in
-the frontend are visual simulations only; they do not call backend workflow
-endpoints and do not write output artifacts.
+The OCR stage is backed by generated artifacts and the editable merge plan.
+Merge currently saves the edited plan before completing its UI simulation;
+actual apply execution is not yet wired.
 
 ## Local development
 
@@ -97,17 +110,19 @@ The static assets are written to `src/webapp/frontend/dist`.
 
 - ✅ FastAPI backend with `/health`, `GET /api/settings`, and `PUT /api/settings`
 - ✅ `POST /api/workflow/start` for configured-folder discovery
-- ✅ `GET /api/workflow/source-preview/{file_id}` for validated image previews
+- ✅ `POST /api/workflow/ocr` for local OCR generation and merge planning
+- ✅ `GET /api/workflow/source-preview/{file_id}` for validated source previews
+- ✅ `GET/PUT /api/workflow/merge-plan` for editable `batch_mrg.json` loading and saving
+- ✅ `GET /api/workflow/ocr-preview/{artifact_id}` for generated artifact previews
+- ✅ `GET /api/workflow/markdown-preview/{artifact_id}` for generated Markdown previews
 - ✅ Pydantic validation and atomic writes to `data/config/settings.json`
 - ✅ Fixed dark theme with light blue accents
 - ✅ Collapsible left side panel with Workflow / Settings sections
-- ✅ Four-stage Workflow panel with Start discovery and simulated OCR/Merge/Rename
+- ✅ Four-stage Workflow panel with Start discovery, wired OCR, editable OCR tree, and simulated Merge/Rename
 - ✅ Settings form with OCR, language model, source/output folders, verbose, and overwrite
-- ❌ Running `md_gen` or `md_mrg` from the browser
-- ❌ Running OCR, merge, or rename from the browser
-- ❌ PDF rendering beyond metadata
+- ❌ Running `md_mrg.cli --apply` from the browser
+- ❌ Running merge apply or rename from the browser
 - ❌ Merge previews backed by generated artifacts
-- ❌ `batch_mrg.json` viewing or editing
 - ❌ Folder picker UX
 - ❌ Authentication / authorization
 - ❌ Database integration

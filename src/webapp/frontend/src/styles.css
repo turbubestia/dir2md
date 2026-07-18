@@ -329,6 +329,71 @@
     @apply absolute left-3 top-3 h-6 w-3 border-l border-b border-shell-border;
   }
 
+  .workflow-ocr-tree {
+    @apply space-y-1;
+  }
+
+  .workflow-ocr-group {
+    @apply rounded border border-shell-border/70 bg-shell-panel/50;
+  }
+
+  .workflow-ocr-group-row,
+  .workflow-ocr-row {
+    @apply w-full min-w-0 rounded px-2.5 py-2 text-left focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-shell-bg;
+  }
+
+  .workflow-ocr-group-row {
+    @apply grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2 border border-transparent text-shell-text hover:border-accent;
+  }
+
+  .workflow-ocr-expander {
+    @apply row-span-2 flex h-5 w-5 items-center justify-center rounded border border-shell-border text-xs text-accent;
+  }
+
+  .workflow-ocr-group-children {
+    @apply pb-1 pl-4 pr-1;
+  }
+
+  .workflow-ocr-row {
+    @apply flex items-start gap-2 border border-shell-border/70 bg-shell-panel/70 hover:border-accent;
+  }
+
+  .workflow-ocr-row-selected {
+    @apply border-accent bg-shell-border;
+  }
+
+  .workflow-ocr-row-dragging {
+    @apply opacity-50;
+  }
+
+  .workflow-ocr-pdf-row {
+    @apply flex-col;
+  }
+
+  .workflow-ocr-page-row {
+    @apply h-6 cursor-grab items-center px-2.5 py-0 active:cursor-grabbing;
+  }
+
+  .workflow-ocr-page-copy {
+    @apply min-w-0 flex items-center;
+  }
+
+  .workflow-ocr-drop-zone {
+    @apply rounded transition-colors duration-150;
+  }
+
+  .workflow-ocr-drop-zone-inside {
+    @apply h-1.5;
+  }
+
+  .workflow-ocr-drop-zone-between {
+    @apply h-2;
+  }
+
+  .workflow-ocr-drop-zone-active {
+    @apply bg-accent;
+  }
+
   .workflow-preview-panel {
     @apply bg-transparent;
   }
@@ -407,6 +472,12 @@
   .workflow-metadata,
   .workflow-markdown-preview {
     @apply flex-1 min-h-0 overflow-auto border border-shell-border bg-shell-panel p-3 text-sm text-shell-muted flex flex-col gap-2 break-words;
+  }
+
+  .workflow-markdown-preview {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   @media (max-width: 1023px) {

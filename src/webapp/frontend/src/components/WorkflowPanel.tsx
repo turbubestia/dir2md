@@ -3,14 +3,25 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import {
   WORKFLOW_EVENTS_URL,
+  buildOcrArtifactPreviewUrl,
   buildSourcePreviewUrl,
+  fetchEditableMergePlan,
+  fetchMarkdownPreview,
   fetchWorkflowState,
+  saveEditableMergePlan,
   startWorkflowDiscovery,
   startWorkflowOcr,
 } from '../api'
 import type {
+  DragPageState,
+  DropTarget,
+  EditableImageGroup,
+  EditableImagePage,
+  EditableMergePlan,
+  EditablePlanDocument,
+  EditablePlanItem,
   MergeRow,
-  OcrTreeRow,
+  MarkdownPreviewResponse,
   RenameRow,
   WorkflowDiscoveryResponse,
   WorkflowState,
@@ -35,6 +46,7 @@ const STAGES: { key: WorkflowStageKey; label: string }[] = [
 type StageStatusLine = { label: string; value: string }
 type SourceOcrStatus = 'pending' | 'running' | 'done' | 'failed'
 type PdfZoomMode = 'fit-width' | 'fit-height' | 'actual-size' | 'custom'
+type MarkdownPreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
 type PdfPanState = {
   pointerId: number
   startX: number
@@ -147,30 +159,6 @@ function stageProgressPercent(stage: WorkflowStageKey): number {
   return (stageIndex / (STAGES.length - 1)) * 100
 }
 
-function ocrRowsFromWorkflow(items: WorkflowSourceFile[], workflowState: WorkflowState | null): OcrTreeRow[] {
-  if (!workflowState || workflowState.ocr_status === 'idle' || workflowState.ocr_status === 'enabled') {
-    return []
-  }
-
-  return items.map((item) => {
-    const isCurrent = workflowState.current_item?.source_id === item.id
-    const status = workflowState.ocr_status === 'failed'
-      ? 'failed'
-      : workflowState.ocr_status === 'complete'
-        ? 'complete'
-        : isCurrent
-          ? 'running'
-          : 'pending'
-
-    return {
-      id: `ocr-${item.id}`,
-      label: `${item.display_name}.md`,
-      source_id: item.id,
-      status,
-    }
-  })
-}
-
 function sourceOcrStatus(item: WorkflowSourceFile, workflowState: WorkflowState | null): SourceOcrStatus | null {
   if (!workflowState || workflowState.ocr_status === 'idle' || workflowState.ocr_status === 'enabled') {
     return null
@@ -213,6 +201,93 @@ function ocrStageState(workflowState: WorkflowState | null, hasDiscovery: boolea
   return 'enabled'
 }
 
+function isImageGroup(item: EditablePlanItem): item is EditableImageGroup {
+  return item.kind === 'image_group'
+}
+
+function planDocuments(plan: EditableMergePlan | null): EditablePlanDocument[] {
+  if (!plan) {
+    return []
+  }
+  return plan.items.flatMap((item): EditablePlanDocument[] => (isImageGroup(item) ? item.documents : [item]))
+}
+
+function findPlanDocument(plan: EditableMergePlan | null, id: string | null): EditablePlanDocument | null {
+  if (!id) {
+    return null
+  }
+  return planDocuments(plan).find((document) => document.id === id) ?? null
+}
+
+function cloneEditablePlan(plan: EditableMergePlan): EditableMergePlan {
+  return JSON.parse(JSON.stringify(plan)) as EditableMergePlan
+}
+
+function findPageLocation(plan: EditableMergePlan, pageId: string): { groupIndex: number; pageIndex: number } | null {
+  for (let groupIndex = 0; groupIndex < plan.items.length; groupIndex += 1) {
+    const item = plan.items[groupIndex]
+    if (!isImageGroup(item)) {
+      continue
+    }
+    const pageIndex = item.documents.findIndex((document) => document.id === pageId)
+    if (pageIndex >= 0) {
+      return { groupIndex, pageIndex }
+    }
+  }
+  return null
+}
+
+function nextGroupLabel(plan: EditableMergePlan): string {
+  const nextIndex = plan.items.filter(isImageGroup).length + 1
+  return `DocumentGroup_${nextIndex}`
+}
+
+function movePage(plan: EditableMergePlan, pageId: string, target: DropTarget): EditableMergePlan {
+  const nextPlan = cloneEditablePlan(plan)
+  const location = findPageLocation(nextPlan, pageId)
+  if (!location) {
+    return plan
+  }
+
+  const sourceGroup = nextPlan.items[location.groupIndex]
+  if (!isImageGroup(sourceGroup)) {
+    return plan
+  }
+
+  if (target.kind === 'inside-group' && sourceGroup.id === target.groupId) {
+    const [page] = sourceGroup.documents.splice(location.pageIndex, 1)
+    const adjustedIndex = target.index > location.pageIndex ? target.index - 1 : target.index
+    sourceGroup.documents.splice(Math.max(0, Math.min(adjustedIndex, sourceGroup.documents.length)), 0, page)
+    return nextPlan
+  }
+
+  const [page] = sourceGroup.documents.splice(location.pageIndex, 1)
+  let removedSourceBeforeTarget = false
+  if (sourceGroup.documents.length === 0) {
+    nextPlan.items.splice(location.groupIndex, 1)
+    removedSourceBeforeTarget = true
+  }
+
+  if (target.kind === 'inside-group') {
+    const targetGroup = nextPlan.items.find((item): item is EditableImageGroup => isImageGroup(item) && item.id === target.groupId)
+    if (!targetGroup) {
+      return plan
+    }
+    targetGroup.documents.splice(Math.max(0, Math.min(target.index, targetGroup.documents.length)), 0, page)
+    return nextPlan
+  }
+
+  const targetIndex = removedSourceBeforeTarget && location.groupIndex < target.index ? target.index - 1 : target.index
+  const displayName = nextGroupLabel(nextPlan)
+  nextPlan.items.splice(Math.max(0, Math.min(targetIndex, nextPlan.items.length)), 0, {
+    id: `group-${Date.now()}`,
+    kind: 'image_group',
+    display_name: displayName,
+    documents: [page],
+  })
+  return nextPlan
+}
+
 export default function WorkflowPanel() {
   const [selectedStage, setSelectedStage] = useState<WorkflowStageKey>('start')
   const [progressStage, setProgressStage] = useState<WorkflowStageKey>('start')
@@ -221,12 +296,20 @@ export default function WorkflowPanel() {
   const [discovery, setDiscovery] = useState<WorkflowDiscoveryResponse | null>(null)
   const [workflowState, setWorkflowState] = useState<WorkflowState | null>(null)
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+  const [editablePlan, setEditablePlan] = useState<EditableMergePlan | null>(null)
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set())
+  const [selectedPlanItemId, setSelectedPlanItemId] = useState<string | null>(null)
+  const [dragState, setDragState] = useState<DragPageState | null>(null)
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
+  const [dragSnapshot, setDragSnapshot] = useState<EditableMergePlan | null>(null)
+  const [markdownPreview, setMarkdownPreview] = useState<MarkdownPreviewResponse | null>(null)
+  const [markdownPreviewStatus, setMarkdownPreviewStatus] = useState<MarkdownPreviewStatus>('idle')
   const [messages, setMessages] = useState<WorkflowStatusMessage[]>([])
-  const [ocrRows, setOcrRows] = useState<OcrTreeRow[]>([])
   const [mergeRows, setMergeRows] = useState<MergeRow[]>([])
   const [renameRows, setRenameRows] = useState<RenameRow[]>([])
   const [timerId, setTimerId] = useState<number | null>(null)
   const hasAutoSelectedOcrAfterComplete = useRef(false)
+  const planLoadRequested = useRef(false)
 
   useEffect(() => {
     return () => {
@@ -240,6 +323,32 @@ export default function WorkflowPanel() {
     let cancelled = false
     let eventSource: EventSource | null = null
 
+    async function loadPlanAfterComplete() {
+      if (planLoadRequested.current) {
+        return
+      }
+      planLoadRequested.current = true
+      try {
+        const plan = await fetchEditableMergePlan()
+        if (cancelled) {
+          return
+        }
+        setEditablePlan(plan)
+        setExpandedGroupIds(new Set(plan.items.filter(isImageGroup).map((item) => item.id)))
+        setSelectedPlanItemId((current) => current ?? planDocuments(plan)[0]?.id ?? null)
+      } catch (error) {
+        if (!cancelled) {
+          setMessages([
+            {
+              severity: 'error',
+              code: 'merge_plan_load_failed',
+              message: error instanceof Error ? error.message : 'Editable merge plan could not be loaded.',
+            },
+          ])
+        }
+      }
+    }
+
     function applyState(nextState: WorkflowState) {
       if (cancelled) {
         return
@@ -250,7 +359,9 @@ export default function WorkflowPanel() {
         setSelectedSourceId((current) => current ?? nextState.discovery?.items[0]?.id ?? null)
       }
       setMessages(nextState.messages)
-      setOcrRows(ocrRowsFromWorkflow(nextState.discovery?.items ?? [], nextState))
+      if (nextState.ocr_status === 'complete') {
+        void loadPlanAfterComplete()
+      }
     }
 
     void fetchWorkflowState()
@@ -288,11 +399,14 @@ export default function WorkflowPanel() {
   const items = discovery?.items ?? EMPTY_ITEMS
   const selectedSource =
     items.find((item) => item.id === selectedSourceId) ?? items[0] ?? null
+  const selectedPlanItem = findPlanDocument(editablePlan, selectedPlanItemId)
   const metrics = discovery?.metrics ?? EMPTY_METRICS
   const hasDiscovery = discovery !== null
-  const progressPercent = workflowState?.ocr_status === 'running' || workflowState?.ocr_status === 'complete'
-    ? workflowState.progress.percent
-    : stageProgressPercent(progressStage)
+  const progressPercent = workflowState?.ocr_status === 'complete'
+    ? 100
+    : workflowState?.ocr_status === 'running'
+      ? workflowState.progress.percent
+      : stageProgressPercent(progressStage)
   const isStageRunning = workflowState?.ocr_status === 'running'
     || Object.values(stageStates).some((state) => state === 'running')
 
@@ -306,8 +420,53 @@ export default function WorkflowPanel() {
         : 'unavailable',
       rename: current.rename === 'complete' ? 'complete' : current.rename,
     }))
-    setOcrRows(ocrRowsFromWorkflow(items, workflowState))
   }, [discovery, hasDiscovery, items, workflowState])
+
+  useEffect(() => {
+    if (selectedStage !== 'ocr' || !selectedPlanItem) {
+      setMarkdownPreview(null)
+      setMarkdownPreviewStatus('idle')
+      return
+    }
+
+    let cancelled = false
+    setMarkdownPreview(null)
+    setMarkdownPreviewStatus('loading')
+    void fetchMarkdownPreview(selectedPlanItem)
+      .then((preview) => {
+        if (!cancelled) {
+          setMarkdownPreview(preview)
+          setMarkdownPreviewStatus('ready')
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMarkdownPreviewStatus('error')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedPlanItem, selectedStage])
+
+  useEffect(() => {
+    if (!dragState) {
+      return
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        if (dragSnapshot) {
+          setEditablePlan(dragSnapshot)
+        }
+        setDragState(null)
+        setDropTarget(null)
+        setDragSnapshot(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [dragSnapshot, dragState])
 
   useEffect(() => {
     if (workflowState?.ocr_status === 'complete' && !hasAutoSelectedOcrAfterComplete.current) {
@@ -332,11 +491,19 @@ export default function WorkflowPanel() {
     setSelectedStage('start')
     setProgressStage('start')
     setStageStates({ ...INITIAL_STAGE_STATES, start: 'running' })
-    setOcrRows([])
+    setEditablePlan(null)
+    setExpandedGroupIds(new Set())
+    setSelectedPlanItemId(null)
+    setDragState(null)
+    setDropTarget(null)
+    setDragSnapshot(null)
+    setMarkdownPreview(null)
+    setMarkdownPreviewStatus('idle')
     setMergeRows([])
     setRenameRows([])
     setSelectedSourceId(null)
     hasAutoSelectedOcrAfterComplete.current = false
+    planLoadRequested.current = false
     setMessages([{ severity: 'info', code: 'start_running', message: 'Reading configured source folder.' }])
 
     try {
@@ -376,13 +543,18 @@ export default function WorkflowPanel() {
     clearPendingTimer()
     setProgressStage('ocr')
     setStageStates((current) => ({ ...current, ocr: 'running' }))
+    setEditablePlan(null)
+    setExpandedGroupIds(new Set())
+    setSelectedPlanItemId(null)
+    setMarkdownPreview(null)
+    setMarkdownPreviewStatus('idle')
+    planLoadRequested.current = false
     setMessages([{ severity: 'info', code: 'ocr_starting', message: 'Starting OCR.' }])
 
     try {
       const state = await startWorkflowOcr()
       setWorkflowState(state)
       setMessages(state.messages)
-      setOcrRows(ocrRowsFromWorkflow(state.discovery?.items ?? items, state))
     } catch (error) {
       setStageStates((current) => ({ ...current, ocr: 'failed' }))
       setMessages([
@@ -416,7 +588,7 @@ export default function WorkflowPanel() {
           {
             id: 'merge-preview',
             title: 'Simulated document group',
-            item_count: items.length,
+            item_count: editablePlan?.items.length ?? items.length,
             status: 'simulated',
           },
         ])
@@ -440,6 +612,43 @@ export default function WorkflowPanel() {
     setTimerId(nextTimerId)
   }
 
+  async function runMergeStage() {
+    if (stageStates.merge === 'unavailable') {
+      setMessages([nextWarning('Merge')])
+      return
+    }
+    if (stageStates.merge === 'running') {
+      return
+    }
+    if (!editablePlan) {
+      setMessages([{ severity: 'error', code: 'merge_plan_missing', message: 'Editable merge plan is not loaded.' }])
+      setStageStates((current) => ({ ...current, merge: 'enabled' }))
+      return
+    }
+
+    clearPendingTimer()
+    setSelectedStage('merge')
+    setStageStates((current) => ({ ...current, merge: 'running' }))
+    setMessages([{ severity: 'info', code: 'merge_plan_saving', message: 'Saving editable merge plan.' }])
+
+    try {
+      const savedPlan = await saveEditableMergePlan(editablePlan)
+      setEditablePlan(savedPlan)
+      setExpandedGroupIds(new Set(savedPlan.items.filter(isImageGroup).map((item) => item.id)))
+      setSelectedPlanItemId((current) => findPlanDocument(savedPlan, current)?.id ?? planDocuments(savedPlan)[0]?.id ?? null)
+      runSimulatedStage('merge')
+    } catch (error) {
+      setStageStates((current) => ({ ...current, merge: 'enabled' }))
+      setMessages([
+        {
+          severity: 'error',
+          code: 'merge_plan_save_failed',
+          message: error instanceof Error ? error.message : 'Editable merge plan could not be saved.',
+        },
+      ])
+    }
+  }
+
   function handleStageClick(stage: WorkflowStageKey) {
     if (isStageRunning) {
       return
@@ -451,6 +660,10 @@ export default function WorkflowPanel() {
     }
     if (stage === 'ocr') {
       void runBackendOcr()
+      return
+    }
+    if (stage === 'merge') {
+      void runMergeStage()
       return
     }
     runSimulatedStage(stage)
@@ -516,24 +729,71 @@ export default function WorkflowPanel() {
             selectedStage={selectedStage}
             items={items}
             selectedSourceId={selectedSource?.id ?? null}
-            ocrRows={ocrRows}
+            editablePlan={editablePlan}
+            expandedGroupIds={expandedGroupIds}
+            selectedPlanItemId={selectedPlanItemId}
+            dragState={dragState}
+            dropTarget={dropTarget}
             mergeRows={mergeRows}
             renameRows={renameRows}
             onSelectSource={setSelectedSourceId}
+            onSelectPlanItem={setSelectedPlanItemId}
+            onToggleGroup={(groupId) => {
+              setExpandedGroupIds((current) => {
+                const next = new Set(current)
+                if (next.has(groupId)) {
+                  next.delete(groupId)
+                } else {
+                  next.add(groupId)
+                }
+                return next
+              })
+            }}
+            onDragStart={(page, groupId) => {
+              if (!editablePlan) {
+                return
+              }
+              setDragState({ pageId: page.id, sourceGroupId: groupId })
+              setDragSnapshot(cloneEditablePlan(editablePlan))
+            }}
+            onDropTargetChange={setDropTarget}
+            onDropPage={(target) => {
+              if (!editablePlan || !dragState) {
+                return
+              }
+              const nextPlan = movePage(editablePlan, dragState.pageId, target)
+              setEditablePlan(nextPlan)
+              setExpandedGroupIds(new Set(nextPlan.items.filter(isImageGroup).map((item) => item.id)))
+              setSelectedPlanItemId(dragState.pageId)
+              setDragState(null)
+              setDropTarget(null)
+              setDragSnapshot(null)
+            }}
+            onDragEnd={() => {
+              setDragState(null)
+              setDropTarget(null)
+              setDragSnapshot(null)
+            }}
             workflowState={workflowState}
             isStageRunning={isStageRunning}
           />
         </section>
         <section className="workflow-panel workflow-preview-panel">
           <h3 className="workflow-panel-title">Document preview</h3>
-          <MiddlePanel selectedStage={selectedStage} selectedSource={selectedSource} />
+          <MiddlePanel selectedStage={selectedStage} selectedSource={selectedSource} selectedPlanItem={selectedPlanItem} />
         </section>
         <section className="workflow-panel workflow-preview-panel">
           <div className="workflow-panel-heading">
             <h3 className="workflow-panel-title">Markdown</h3>
             <span>Code <strong>Preview</strong></span>
           </div>
-          <RightPanel selectedStage={selectedStage} selectedSource={selectedSource} />
+          <RightPanel
+            selectedStage={selectedStage}
+            selectedSource={selectedSource}
+            selectedPlanItem={selectedPlanItem}
+            markdownPreview={markdownPreview}
+            markdownPreviewStatus={markdownPreviewStatus}
+          />
         </section>
       </div>
 
@@ -581,20 +841,40 @@ function LeftPanel({
   selectedStage,
   items,
   selectedSourceId,
-  ocrRows,
+  editablePlan,
+  expandedGroupIds,
+  selectedPlanItemId,
+  dragState,
+  dropTarget,
   mergeRows,
   renameRows,
   onSelectSource,
+  onSelectPlanItem,
+  onToggleGroup,
+  onDragStart,
+  onDropTargetChange,
+  onDropPage,
+  onDragEnd,
   workflowState,
   isStageRunning,
 }: {
   selectedStage: WorkflowStageKey
   items: WorkflowSourceFile[]
   selectedSourceId: string | null
-  ocrRows: OcrTreeRow[]
+  editablePlan: EditableMergePlan | null
+  expandedGroupIds: Set<string>
+  selectedPlanItemId: string | null
+  dragState: DragPageState | null
+  dropTarget: DropTarget | null
   mergeRows: MergeRow[]
   renameRows: RenameRow[]
   onSelectSource: (id: string) => void
+  onSelectPlanItem: (id: string) => void
+  onToggleGroup: (groupId: string) => void
+  onDragStart: (page: EditableImagePage, groupId: string) => void
+  onDropTargetChange: (target: DropTarget | null) => void
+  onDropPage: (target: DropTarget) => void
+  onDragEnd: () => void
   workflowState: WorkflowState | null
   isStageRunning: boolean
 }) {
@@ -640,21 +920,36 @@ function LeftPanel({
   }
 
   if (selectedStage === 'ocr') {
-    return ocrRows.length > 0 ? (
-      <div className="workflow-scroll-list">
-        {ocrRows.map((row) => (
-          <div
-            key={row.id}
-            className={`workflow-tree-row workflow-tree-row-${row.status} ${workflowState?.current_item?.source_id === row.source_id ? 'workflow-row-active-ocr' : ''}`}
-          >
-            <span className="workflow-tree-branch" />
-            <span className="workflow-row-title">{row.label}</span>
-            <span className="workflow-row-subtitle">{row.status}</span>
-          </div>
+    if (!editablePlan) {
+      return <EmptyPanel text="OCR rows will appear after OCR completes." />
+    }
+    return (
+      <div className="workflow-scroll-list workflow-ocr-tree">
+        {editablePlan.items.map((item, itemIndex) => (
+          <OcrPlanItemRow
+            key={item.id}
+            item={item}
+            itemIndex={itemIndex}
+            expandedGroupIds={expandedGroupIds}
+            selectedPlanItemId={selectedPlanItemId}
+            dragState={dragState}
+            dropTarget={dropTarget}
+            onSelectPlanItem={onSelectPlanItem}
+            onToggleGroup={onToggleGroup}
+            onDragStart={onDragStart}
+            onDropTargetChange={onDropTargetChange}
+            onDropPage={onDropPage}
+            onDragEnd={onDragEnd}
+          />
         ))}
+        <BetweenGroupDropZone
+          index={editablePlan.items.length}
+          dragState={dragState}
+          dropTarget={dropTarget}
+          onDropTargetChange={onDropTargetChange}
+          onDropPage={onDropPage}
+        />
       </div>
-    ) : (
-      <EmptyPanel text="OCR rows will appear after OCR starts." />
     )
   }
 
@@ -687,13 +982,220 @@ function LeftPanel({
   )
 }
 
+function OcrPlanItemRow({
+  item,
+  itemIndex,
+  expandedGroupIds,
+  selectedPlanItemId,
+  dragState,
+  dropTarget,
+  onSelectPlanItem,
+  onToggleGroup,
+  onDragStart,
+  onDropTargetChange,
+  onDropPage,
+  onDragEnd,
+}: {
+  item: EditablePlanItem
+  itemIndex: number
+  expandedGroupIds: Set<string>
+  selectedPlanItemId: string | null
+  dragState: DragPageState | null
+  dropTarget: DropTarget | null
+  onSelectPlanItem: (id: string) => void
+  onToggleGroup: (groupId: string) => void
+  onDragStart: (page: EditableImagePage, groupId: string) => void
+  onDropTargetChange: (target: DropTarget | null) => void
+  onDropPage: (target: DropTarget) => void
+  onDragEnd: () => void
+}) {
+  if (!isImageGroup(item)) {
+    const isSelected = selectedPlanItemId === item.id
+    return (
+      <>
+        <BetweenGroupDropZone
+          index={itemIndex}
+          dragState={dragState}
+          dropTarget={dropTarget}
+          onDropTargetChange={onDropTargetChange}
+          onDropPage={onDropPage}
+        />
+        <button
+          type="button"
+          className={`workflow-ocr-row workflow-ocr-pdf-row ${isSelected ? 'workflow-ocr-row-selected' : ''}`}
+          onClick={() => onSelectPlanItem(item.id)}
+        >
+          <span className="workflow-row-title">{item.source_file_name}</span>
+          <span className="workflow-row-subtitle">PDF · {item.markdown_file}</span>
+        </button>
+      </>
+    )
+  }
+
+  const isExpanded = expandedGroupIds.has(item.id)
+  return (
+    <>
+      <BetweenGroupDropZone
+        index={itemIndex}
+        dragState={dragState}
+        dropTarget={dropTarget}
+        onDropTargetChange={onDropTargetChange}
+        onDropPage={onDropPage}
+      />
+      <div className="workflow-ocr-group">
+        <button
+          type="button"
+          className="workflow-ocr-group-row"
+          onClick={() => onToggleGroup(item.id)}
+          aria-expanded={isExpanded}
+        >
+          <span className="workflow-ocr-expander">{isExpanded ? '-' : '+'}</span>
+          <span className="workflow-row-title">{item.display_name}</span>
+          <span className="workflow-row-subtitle">{item.documents.length} image page(s)</span>
+        </button>
+        {isExpanded ? (
+          <div className="workflow-ocr-group-children">
+            {item.documents.map((page, pageIndex) => (
+              <div key={page.id}>
+                <InsideGroupDropZone
+                  groupId={item.id}
+                  index={pageIndex}
+                  dragState={dragState}
+                  dropTarget={dropTarget}
+                  onDropTargetChange={onDropTargetChange}
+                  onDropPage={onDropPage}
+                />
+                <button
+                  type="button"
+                  draggable
+                  className={`workflow-ocr-row workflow-ocr-page-row ${selectedPlanItemId === page.id ? 'workflow-ocr-row-selected' : ''} ${dragState?.pageId === page.id ? 'workflow-ocr-row-dragging' : ''}`}
+                  onClick={() => onSelectPlanItem(page.id)}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', page.id)
+                    onDragStart(page, item.id)
+                  }}
+                  onDragEnd={onDragEnd}
+                >
+                  <span className="workflow-ocr-page-copy">
+                    <span className="workflow-row-subtitle">Image - {page.source_file_name}</span>
+                  </span>
+                </button>
+              </div>
+            ))}
+            <InsideGroupDropZone
+              groupId={item.id}
+              index={item.documents.length}
+              dragState={dragState}
+              dropTarget={dropTarget}
+              onDropTargetChange={onDropTargetChange}
+              onDropPage={onDropPage}
+            />
+          </div>
+        ) : null}
+      </div>
+    </>
+  )
+}
+
+function InsideGroupDropZone({
+  groupId,
+  index,
+  dragState,
+  dropTarget,
+  onDropTargetChange,
+  onDropPage,
+}: {
+  groupId: string
+  index: number
+  dragState: DragPageState | null
+  dropTarget: DropTarget | null
+  onDropTargetChange: (target: DropTarget | null) => void
+  onDropPage: (target: DropTarget) => void
+}) {
+  const target: DropTarget = { kind: 'inside-group', groupId, index }
+  const isActive = dropTarget?.kind === 'inside-group' && dropTarget.groupId === groupId && dropTarget.index === index
+  return (
+    <div
+      className={`workflow-ocr-drop-zone workflow-ocr-drop-zone-inside ${isActive ? 'workflow-ocr-drop-zone-active' : ''}`}
+      onDragOver={(event) => {
+        if (!dragState) {
+          return
+        }
+        event.preventDefault()
+        onDropTargetChange(target)
+      }}
+      onDragLeave={() => onDropTargetChange(null)}
+      onDrop={(event) => {
+        event.preventDefault()
+        if (dragState) {
+          onDropPage(target)
+        }
+      }}
+    />
+  )
+}
+
+function BetweenGroupDropZone({
+  index,
+  dragState,
+  dropTarget,
+  onDropTargetChange,
+  onDropPage,
+}: {
+  index: number
+  dragState: DragPageState | null
+  dropTarget: DropTarget | null
+  onDropTargetChange: (target: DropTarget | null) => void
+  onDropPage: (target: DropTarget) => void
+}) {
+  const target: DropTarget = { kind: 'between-groups', index }
+  const isActive = dropTarget?.kind === 'between-groups' && dropTarget.index === index
+  return (
+    <div
+      className={`workflow-ocr-drop-zone workflow-ocr-drop-zone-between ${isActive ? 'workflow-ocr-drop-zone-active' : ''}`}
+      onDragOver={(event) => {
+        if (!dragState) {
+          return
+        }
+        event.preventDefault()
+        onDropTargetChange(target)
+      }}
+      onDragLeave={() => onDropTargetChange(null)}
+      onDrop={(event) => {
+        event.preventDefault()
+        if (dragState) {
+          onDropPage(target)
+        }
+      }}
+    />
+  )
+}
+
 function MiddlePanel({
   selectedStage,
   selectedSource,
+  selectedPlanItem,
 }: {
   selectedStage: WorkflowStageKey
   selectedSource: WorkflowSourceFile | null
+  selectedPlanItem: EditablePlanDocument | null
 }) {
+  if (selectedStage === 'ocr') {
+    if (!selectedPlanItem) {
+      return <EmptyPanel text="Select an OCR item to preview its generated artifact." />
+    }
+    const previewUrl = buildOcrArtifactPreviewUrl(selectedPlanItem)
+    if (selectedPlanItem.file_type === 'image') {
+      return (
+        <div className="workflow-image-frame">
+          <img src={previewUrl} alt={selectedPlanItem.source_file_name} />
+        </div>
+      )
+    }
+    return <PdfPreview fileUrl={previewUrl} />
+  }
+
   if (selectedStage !== 'start') {
     return (
       <div className="workflow-preview-empty">
@@ -933,12 +1435,35 @@ function PdfPreview({
 function RightPanel({
   selectedStage,
   selectedSource,
+  selectedPlanItem,
+  markdownPreview,
+  markdownPreviewStatus,
 }: {
   selectedStage: WorkflowStageKey
   selectedSource: WorkflowSourceFile | null
+  selectedPlanItem: EditablePlanDocument | null
+  markdownPreview: MarkdownPreviewResponse | null
+  markdownPreviewStatus: MarkdownPreviewStatus
 }) {
   if (selectedStage === 'start') {
     return <EmptyPanel text="Markdown preview is unavailable before OCR." />
+  }
+
+  if (selectedStage === 'ocr') {
+    if (!selectedPlanItem) {
+      return <EmptyPanel text="Select an OCR item to preview its Markdown." />
+    }
+    if (markdownPreviewStatus === 'loading') {
+      return <EmptyPanel text="Loading Markdown preview..." />
+    }
+    if (markdownPreviewStatus === 'error') {
+      return <EmptyPanel text="Markdown preview could not be loaded." />
+    }
+    return (
+      <pre className="workflow-markdown-preview">
+        {markdownPreview?.content || 'Markdown preview is empty.'}
+      </pre>
+    )
   }
 
   const name = selectedSource?.display_name ?? 'selected source'

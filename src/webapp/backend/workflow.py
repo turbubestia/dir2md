@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import queue
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -27,8 +28,13 @@ from md_mrg.planner import PlannerError, PlanningProgressEvent
 
 from .models import (
     AppSettings,
+    EditableImageGroup,
+    EditableImagePage,
+    EditableMergePlan,
+    EditablePdfDocument,
     FolderStatus,
     FolderStatusKind,
+    MarkdownPreviewResponse,
     WorkflowActiveComparison,
     WorkflowActiveItem,
     WorkflowCounts,
@@ -78,6 +84,41 @@ class WorkflowService:
 
     def resolve_preview_path(self, settings: AppSettings, file_id: str) -> Path:
         return _resolve_preview_path(settings, file_id)
+
+    def get_editable_merge_plan(self, settings: AppSettings) -> EditableMergePlan:
+        output_dir = _resolve_output_dir(settings)
+        return _editable_plan_from_payload(_load_merge_plan_payload(output_dir))
+
+    def save_editable_merge_plan(self, settings: AppSettings, plan: EditableMergePlan) -> EditableMergePlan:
+        with self._lock:
+            if self._state.ocr_status == "running":
+                raise WorkflowServiceError("Cannot save the merge plan while OCR is running.", status_code=409)
+
+        output_dir = _resolve_output_dir(settings)
+        plan_path = output_dir / md_mrg_planner.MERGE_PLAN_FILE_NAME
+        if not plan_path.exists():
+            raise WorkflowServiceError("Merge plan was not found.", status_code=404)
+
+        payload = _payload_from_editable_plan(plan)
+        _write_json_atomic(plan_path, payload)
+        return _editable_plan_from_payload(_load_merge_plan_payload(output_dir))
+
+    def resolve_ocr_artifact_preview_path(self, settings: AppSettings, artifact_id: str) -> Path:
+        output_dir = _resolve_output_dir(settings)
+        document = _document_from_editable_plan(output_dir, artifact_id)
+        return _resolve_source_artifact_file(settings, document.source_file_name)
+
+    def get_markdown_preview(self, settings: AppSettings, artifact_id: str) -> MarkdownPreviewResponse:
+        output_dir = _resolve_output_dir(settings)
+        document = _document_from_editable_plan(output_dir, artifact_id)
+        markdown_path = _resolve_output_file(output_dir, document.markdown_file, missing_message="Markdown preview was not found.")
+        try:
+            content = markdown_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise WorkflowServiceError("Markdown preview is not valid UTF-8.", status_code=400) from exc
+        except OSError as exc:
+            raise WorkflowServiceError("Markdown preview could not be read.", status_code=500) from exc
+        return MarkdownPreviewResponse(id=document.id, markdown_file=document.markdown_file, content=content)
 
     def start_ocr(self, settings: AppSettings) -> WorkflowState:
         with self._lock:
@@ -140,6 +181,7 @@ class WorkflowService:
                 self._mark_failed("plan_invalid", "Merge planning returned an invalid document list.")
                 return
             self._update_counts_from_plan(config.paths.output_dir / md_mrg_planner.MERGE_PLAN_FILE_NAME)
+            _editable_plan_from_payload(_load_merge_plan_payload(config.paths.output_dir))
             self._mark_complete()
         except PlannerError as exc:
             self._mark_failed(exc.error_code, str(exc))
@@ -320,6 +362,191 @@ def discover_start(settings: AppSettings) -> WorkflowDiscoveryResponse:
 def resolve_preview_path(settings: AppSettings, file_id: str) -> Path:
     """Compatibility wrapper for tests and direct callers."""
     return _resolve_preview_path(settings, file_id)
+
+
+def _resolve_output_dir(settings: AppSettings) -> Path:
+    if not settings.output_folder.strip():
+        raise WorkflowServiceError("Output folder is not configured.", status_code=400)
+    try:
+        output_dir = Path(settings.output_folder).expanduser().resolve()
+    except OSError as exc:
+        raise WorkflowServiceError("Output folder cannot be resolved.", status_code=400) from exc
+    if not output_dir.exists():
+        raise WorkflowServiceError(f"Output folder does not exist: {output_dir}", status_code=404)
+    if not output_dir.is_dir():
+        raise WorkflowServiceError(f"Output path is not a directory: {output_dir}", status_code=400)
+    try:
+        next(output_dir.iterdir(), None)
+    except OSError as exc:
+        raise WorkflowServiceError(f"Output folder cannot be accessed: {output_dir}", status_code=400) from exc
+    return output_dir
+
+
+def _load_merge_plan_payload(output_dir: Path) -> dict[str, Any]:
+    plan_path = output_dir / md_mrg_planner.MERGE_PLAN_FILE_NAME
+    if not plan_path.exists():
+        raise WorkflowServiceError("Merge plan was not found.", status_code=404)
+    return _read_json(plan_path)
+
+
+def _editable_plan_from_payload(payload: dict[str, Any]) -> EditableMergePlan:
+    raw_documents = payload.get("documents")
+    if not isinstance(raw_documents, list):
+        raise WorkflowServiceError("batch_mrg.json has an invalid documents field.", status_code=400)
+
+    items: list[EditableImageGroup | EditablePdfDocument] = []
+    for index, raw_item in enumerate(raw_documents, start=1):
+        if not isinstance(raw_item, dict):
+            raise WorkflowServiceError("Merge plan item must be an object.", status_code=400)
+
+        if isinstance(raw_item.get("documents"), list):
+            group_documents: list[EditableImagePage] = []
+            if not raw_item["documents"]:
+                raise WorkflowServiceError("Image groups must contain at least one image page.", status_code=400)
+            for raw_child in raw_item["documents"]:
+                if not isinstance(raw_child, dict):
+                    raise WorkflowServiceError("Image group document must be an object.", status_code=400)
+                if raw_child.get("file_type") != "image":
+                    raise WorkflowServiceError("Image groups can only contain image documents.", status_code=400)
+                group_documents.append(_editable_image_page_from_payload(raw_child))
+            items.append(
+                EditableImageGroup(
+                    id=f"group-{index}",
+                    display_name=f"DocumentGroup_{index}",
+                    documents=group_documents,
+                )
+            )
+            continue
+
+        if raw_item.get("file_type") == "pdf":
+            items.append(_editable_pdf_from_payload(raw_item))
+            continue
+
+        if raw_item.get("file_type") == "image":
+            raise WorkflowServiceError("Image documents must be inside an image group.", status_code=400)
+        raise WorkflowServiceError("Merge plan item must be an image group or PDF document.", status_code=400)
+
+    top_level_extra = {key: value for key, value in payload.items() if key != "documents"}
+    try:
+        return EditableMergePlan(items=items, **top_level_extra)
+    except ValueError as exc:
+        raise WorkflowServiceError(str(exc), status_code=400) from exc
+
+
+def _editable_image_page_from_payload(payload: dict[str, Any]) -> EditableImagePage:
+    _require_document_paths(payload)
+    return EditableImagePage(id=_encode_artifact_id(payload["source_file_name"], payload["markdown_file"]), **payload)
+
+
+def _editable_pdf_from_payload(payload: dict[str, Any]) -> EditablePdfDocument:
+    _require_document_paths(payload)
+    return EditablePdfDocument(id=_encode_artifact_id(payload["source_file_name"], payload["markdown_file"]), **payload)
+
+
+def _require_document_paths(payload: dict[str, Any]) -> None:
+    if not isinstance(payload.get("source_file_name"), str) or not payload["source_file_name"].strip():
+        raise WorkflowServiceError("Merge plan document is missing source_file_name.", status_code=400)
+    if not isinstance(payload.get("markdown_file"), str) or not payload["markdown_file"].strip():
+        raise WorkflowServiceError("Merge plan document is missing markdown_file.", status_code=400)
+
+
+def _payload_from_editable_plan(plan: EditableMergePlan) -> dict[str, Any]:
+    documents: list[dict[str, Any]] = []
+    for item in plan.items:
+        if isinstance(item, EditableImageGroup):
+            documents.append({"documents": [_document_payload(document) for document in item.documents]})
+        else:
+            documents.append(_document_payload(item))
+
+    payload = dict(plan.model_extra or {})
+    payload["documents"] = documents
+    return payload
+
+
+def _document_payload(document: EditableImagePage | EditablePdfDocument) -> dict[str, Any]:
+    return document.model_dump(mode="json", exclude={"id", "kind"}, exclude_none=True)
+
+
+def _document_from_editable_plan(output_dir: Path, artifact_id: str) -> EditableImagePage | EditablePdfDocument:
+    artifact_key = _decode_artifact_id(artifact_id)
+    plan = _editable_plan_from_payload(_load_merge_plan_payload(output_dir))
+    for item in plan.items:
+        documents = item.documents if isinstance(item, EditableImageGroup) else [item]
+        for document in documents:
+            if document.id == artifact_id and (document.source_file_name, document.markdown_file) == artifact_key:
+                return document
+    raise WorkflowServiceError("Artifact id does not match the editable merge plan.", status_code=404)
+
+
+def _resolve_output_file(output_dir: Path, relative_name: str, *, missing_message: str) -> Path:
+    relative_path = Path(relative_name)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise WorkflowServiceError("Artifact path is outside the configured output folder.", status_code=400)
+    try:
+        candidate = (output_dir / relative_path).resolve()
+        candidate.relative_to(output_dir)
+    except (OSError, ValueError) as exc:
+        raise WorkflowServiceError("Artifact path is outside the configured output folder.", status_code=400) from exc
+    if not candidate.exists() or not candidate.is_file():
+        raise WorkflowServiceError(missing_message, status_code=404)
+    return candidate
+
+
+def _resolve_source_artifact_file(settings: AppSettings, relative_name: str) -> Path:
+    source_status, source_dir = _inspect_source_folder(settings.source_folder)
+    if source_dir is None:
+        raise WorkflowServiceError(source_status.message, status_code=404)
+
+    relative_path = Path(relative_name)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise WorkflowServiceError("Artifact path is outside the configured source folder.", status_code=400)
+    try:
+        candidate = (source_dir / relative_path).resolve()
+        candidate.relative_to(source_dir)
+    except (OSError, ValueError) as exc:
+        raise WorkflowServiceError("Artifact path is outside the configured source folder.", status_code=400) from exc
+    if not candidate.exists() or not candidate.is_file():
+        raise WorkflowServiceError("OCR artifact was not found.", status_code=404)
+    return candidate
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            tmp_path = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        tmp_path.replace(path)
+    except OSError as exc:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except (NameError, OSError):
+            pass
+        raise WorkflowServiceError("Merge plan could not be saved.", status_code=500) from exc
+
+
+def _encode_artifact_id(source_file_name: str, markdown_file: str) -> str:
+    raw = json.dumps([source_file_name, markdown_file], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_artifact_id(artifact_id: str) -> tuple[str, str]:
+    try:
+        padding = "=" * (-len(artifact_id) % 4)
+        decoded = base64.urlsafe_b64decode(f"{artifact_id}{padding}").decode("utf-8")
+        payload = json.loads(decoded)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WorkflowServiceError("Artifact id is invalid.", status_code=400) from exc
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 2
+        or not isinstance(payload[0], str)
+        or not isinstance(payload[1], str)
+        or not payload[0].strip()
+        or not payload[1].strip()
+    ):
+        raise WorkflowServiceError("Artifact id is invalid.", status_code=400)
+    return payload[0], payload[1]
 
 
 def _discover_start(settings: AppSettings) -> WorkflowDiscoveryResponse:

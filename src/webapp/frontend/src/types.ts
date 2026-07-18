@@ -144,6 +144,58 @@ export interface WorkflowState {
   error: WorkflowStatusMessage | null
 }
 
+export interface EditablePlanDocumentBase {
+  [key: string]: unknown
+  id: string
+  source_file_name: string
+  file_type: SourceFileType
+  markdown_file: string
+  page_count?: number | null
+  date_of_process?: string | null
+  summary?: string | null
+  status?: string | null
+}
+
+export interface EditableImagePage extends EditablePlanDocumentBase {
+  kind: 'image_page'
+  file_type: 'image'
+}
+
+export interface EditablePdfDocument extends EditablePlanDocumentBase {
+  kind: 'pdf'
+  file_type: 'pdf'
+}
+
+export interface EditableImageGroup {
+  id: string
+  kind: 'image_group'
+  display_name: string
+  documents: EditableImagePage[]
+}
+
+export type EditablePlanDocument = EditableImagePage | EditablePdfDocument
+export type EditablePlanItem = EditableImageGroup | EditablePdfDocument
+
+export interface EditableMergePlan {
+  [key: string]: unknown
+  items: EditablePlanItem[]
+}
+
+export interface MarkdownPreviewResponse {
+  id: string
+  markdown_file: string
+  content: string
+}
+
+export interface DragPageState {
+  pageId: string
+  sourceGroupId: string
+}
+
+export type DropTarget =
+  | { kind: 'inside-group'; groupId: string; index: number }
+  | { kind: 'between-groups'; index: number }
+
 export interface OcrTreeRow {
   id: string
   label: string
