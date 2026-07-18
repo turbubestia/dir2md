@@ -264,6 +264,7 @@ def test_workflow_state_is_idle_before_start(workflow_paths) -> None:
     assert data["discovery"] is None
     assert data["ocr_status"] == "idle"
     assert data["progress"]["percent"] == 0.0
+    assert data["completed_item_ids"] == []
 
 
 def test_ocr_requires_successful_non_empty_start(workflow_paths) -> None:
@@ -321,8 +322,50 @@ def test_ocr_runs_generation_then_planning_and_updates_state(workflow_paths, tmp
     assert state["ocr_status"] == "complete"
     assert state["progress"]["percent"] == 100.0
     assert state["counts"] == {"markdown_count": 2, "pdf_document_count": 1, "image_group_count": 1}
+    assert set(state["completed_item_ids"]) == {item["id"] for item in state["discovery"]["items"]}
     assert state["current_item"] is None
     assert state["active_comparison"] is None
+
+    client.post("/api/workflow/start")
+    reset_state = client.get("/api/workflow/state").json()
+    assert reset_state["completed_item_ids"] == []
+
+
+def test_ocr_reports_completed_items_while_running(workflow_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    (source / "scan-1.png").write_bytes(b"png")
+    (source / "scan-2.png").write_bytes(b"png")
+    _write_settings(settings_path, source, output)
+    first_item_done = threading.Event()
+    release = threading.Event()
+
+    def fake_generation(config, progress_callback=None):
+        if progress_callback:
+            progress_callback(GenerationProgressEvent(kind="stage_start", total_jobs=2))
+            progress_callback(GenerationProgressEvent(kind="ocr_item_start", total_jobs=2, source_path=source / "scan-1.png", source_file_name="scan-1.png", source_type="image", page_number=1, markdown_path=output / "scan-1.md"))
+            progress_callback(GenerationProgressEvent(kind="ocr_item_complete", total_jobs=2, completed_jobs=1, markdown_count=1, source_path=source / "scan-1.png", source_file_name="scan-1.png", source_type="image", page_number=1, markdown_path=output / "scan-1.md"))
+        first_item_done.set()
+        release.wait(timeout=2)
+        (output / "batch.json").write_text(json.dumps({"documents": []}), encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr("webapp.backend.workflow.md_gen_foundation.run_generation", fake_generation)
+    monkeypatch.setattr("webapp.backend.workflow.md_mrg_planner.run_plan", lambda source_dir, cfg, *, progress_callback=None: (output / "batch_mrg.json").write_text('{"documents": []}', encoding="utf-8") or {"documents": []})
+    client = _client(settings_path, defaults_path)
+    discovery = client.post("/api/workflow/start").json()
+    first_item_id = discovery["items"][0]["id"]
+    assert client.post("/api/workflow/ocr").status_code == 200
+    assert first_item_done.wait(timeout=2)
+
+    running_state = client.get("/api/workflow/state").json()
+    release.set()
+
+    assert running_state["ocr_status"] == "running"
+    assert running_state["completed_item_ids"] == [first_item_id]
 
 
 def test_ocr_conflict_while_running(workflow_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -96,6 +96,7 @@ class WorkflowService:
             self._state.counts = WorkflowCounts()
             self._state.current_item = None
             self._state.active_comparison = None
+            self._state.completed_item_ids = []
             self._state.error = None
             self._state.messages = [
                 WorkflowStatusMessage(severity="info", code="ocr_running", message="OCR generation is running.")
@@ -155,6 +156,11 @@ class WorkflowService:
                     percent=0.0,
                 )
             elif event.kind in {"ocr_item_start", "ocr_item_complete"}:
+                next_item = _active_item_from_generation_event(self._state.discovery, event)
+                if event.kind == "ocr_item_start" and next_item is not None:
+                    current_item = self._state.current_item
+                    if current_item is not None and current_item.source_id != next_item.source_id:
+                        self._add_completed_item_id(current_item.source_id)
                 self._state.progress = WorkflowProgress(
                     stage="ocr",
                     total_jobs=event.total_jobs,
@@ -162,8 +168,10 @@ class WorkflowService:
                     percent=_bounded_percent(event.completed_jobs, event.total_jobs, start=0.0, span=50.0),
                 )
                 self._state.counts.markdown_count = event.markdown_count
-                self._state.current_item = _active_item_from_generation_event(self._state.discovery, event)
+                self._state.current_item = next_item
                 self._state.active_comparison = None
+                if event.kind == "ocr_item_complete" and event.source_type == "image" and next_item is not None:
+                    self._add_completed_item_id(next_item.source_id)
                 if event.kind == "ocr_item_start" and event.source_file_name:
                     page = f" page {event.page_number}" if event.page_number else ""
                     self._state.messages = [
@@ -181,6 +189,8 @@ class WorkflowService:
                     percent=50.0,
                 )
                 self._state.counts.markdown_count = event.markdown_count
+                if self._state.current_item is not None:
+                    self._add_completed_item_id(self._state.current_item.source_id)
                 self._state.current_item = None
             elif event.kind == "failed":
                 self._state.error = WorkflowStatusMessage(
@@ -277,6 +287,10 @@ class WorkflowService:
             self._state.progress = WorkflowProgress(stage="planning", total_jobs=0, completed_jobs=0, percent=100.0)
             self._state.current_item = None
             self._state.active_comparison = None
+            self._state.completed_item_ids = _merge_unique_ids(
+                self._state.completed_item_ids,
+                _all_discovered_item_ids(self._state.discovery),
+            )
             self._state.error = None
             self._state.messages = [
                 WorkflowStatusMessage(severity="success", code="ocr_complete", message="OCR and planning completed.")
@@ -292,6 +306,10 @@ class WorkflowService:
 
     def _copy_state(self) -> WorkflowState:
         return self._state.model_copy(deep=True)
+
+    def _add_completed_item_id(self, source_id: str | None) -> None:
+        if source_id is not None and source_id not in self._state.completed_item_ids:
+            self._state.completed_item_ids.append(source_id)
 
 
 def discover_start(settings: AppSettings) -> WorkflowDiscoveryResponse:
@@ -592,6 +610,20 @@ def _source_id_from_display_name(discovery: WorkflowDiscoveryResponse | None, di
         if item.display_name == display_name:
             return item.id
     return None
+
+
+def _all_discovered_item_ids(discovery: WorkflowDiscoveryResponse | None) -> list[str]:
+    if discovery is None:
+        return []
+    return [item.id for item in discovery.items]
+
+
+def _merge_unique_ids(left: list[str], right: list[str]) -> list[str]:
+    merged = list(left)
+    for item_id in right:
+        if item_id not in merged:
+            merged.append(item_id)
+    return merged
 
 
 def _read_json(path: Path) -> dict[str, Any]:

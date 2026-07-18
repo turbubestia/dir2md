@@ -139,6 +139,7 @@ export interface WorkflowState {
   counts: WorkflowCounts
   current_item: WorkflowActiveItem | null
   active_comparison: WorkflowActiveComparison | null
+  completed_item_ids: string[]
   messages: WorkflowStatusMessage[]
   error: WorkflowStatusMessage | null
 }

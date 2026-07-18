@@ -95,6 +95,10 @@
     @apply relative z-20 w-[6.25rem] px-4 py-1.5 rounded-md border text-sm font-semibold flex items-center justify-center transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-shell-bg;
   }
 
+  .workflow-stage:disabled {
+    @apply cursor-not-allowed;
+  }
+
   .workflow-stage-unavailable {
     @apply border-sky-200 bg-sky-200 text-slate-950 opacity-100;
     background-color: #bae6fd;
@@ -246,12 +250,29 @@
     @apply hover:border-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-shell-bg;
   }
 
+  .workflow-row:disabled {
+    @apply cursor-not-allowed hover:border-shell-border/70 focus:ring-0 focus:ring-offset-0;
+  }
+
+  .workflow-row-disabled {
+    @apply cursor-not-allowed hover:border-shell-border/70 focus:ring-0 focus:ring-offset-0;
+    pointer-events: none;
+  }
+
   .workflow-row-selected {
     @apply border-accent bg-shell-border;
   }
 
   .workflow-row-active-ocr {
     @apply border-sky-300 bg-sky-950/50;
+  }
+
+  .workflow-row-done {
+    @apply border-shell-border/70 bg-shell-panel/70;
+  }
+
+  .workflow-row-failed {
+    @apply border-red-600 bg-red-950/30;
   }
 
   .workflow-row-active-comparison {
@@ -264,6 +285,24 @@
 
   .workflow-row-subtitle {
     @apply text-xs text-shell-muted break-words;
+  }
+
+  .workflow-row-process-status {
+    @apply text-xs font-normal normal-case tracking-normal;
+    color: #94a3b8;
+  }
+
+  .workflow-row-process-status-pending,
+  .workflow-row-process-status-running {
+    color: #94a3b8;
+  }
+
+  .workflow-row-process-status-done {
+    color: #6ee7b7;
+  }
+
+  .workflow-row-process-status-failed {
+    color: #fca5a5;
   }
 
   .workflow-row-path {

@@ -33,6 +33,7 @@ const STAGES: { key: WorkflowStageKey; label: string }[] = [
 ]
 
 type StageStatusLine = { label: string; value: string }
+type SourceOcrStatus = 'pending' | 'running' | 'done' | 'failed'
 type PdfZoomMode = 'fit-width' | 'fit-height' | 'actual-size' | 'custom'
 type PdfPanState = {
   pointerId: number
@@ -170,6 +171,32 @@ function ocrRowsFromWorkflow(items: WorkflowSourceFile[], workflowState: Workflo
   })
 }
 
+function sourceOcrStatus(item: WorkflowSourceFile, workflowState: WorkflowState | null): SourceOcrStatus | null {
+  if (!workflowState || workflowState.ocr_status === 'idle' || workflowState.ocr_status === 'enabled') {
+    return null
+  }
+  if (workflowState.ocr_status === 'complete' || workflowState.completed_item_ids.includes(item.id)) {
+    return 'done'
+  }
+  if (workflowState.current_item?.source_id === item.id) {
+    return 'running'
+  }
+  if (workflowState.ocr_status === 'failed') {
+    return 'failed'
+  }
+  return 'pending'
+}
+
+function sourceOcrStatusColor(status: SourceOcrStatus): string {
+  if (status === 'done') {
+    return '#6ee7b7'
+  }
+  if (status === 'failed') {
+    return '#fca5a5'
+  }
+  return '#94a3b8'
+}
+
 function ocrStageState(workflowState: WorkflowState | null, hasDiscovery: boolean): WorkflowStageState {
   if (!hasDiscovery) {
     return 'unavailable'
@@ -199,6 +226,7 @@ export default function WorkflowPanel() {
   const [mergeRows, setMergeRows] = useState<MergeRow[]>([])
   const [renameRows, setRenameRows] = useState<RenameRow[]>([])
   const [timerId, setTimerId] = useState<number | null>(null)
+  const hasAutoSelectedOcrAfterComplete = useRef(false)
 
   useEffect(() => {
     return () => {
@@ -265,6 +293,8 @@ export default function WorkflowPanel() {
   const progressPercent = workflowState?.ocr_status === 'running' || workflowState?.ocr_status === 'complete'
     ? workflowState.progress.percent
     : stageProgressPercent(progressStage)
+  const isStageRunning = workflowState?.ocr_status === 'running'
+    || Object.values(stageStates).some((state) => state === 'running')
 
   useEffect(() => {
     setStageStates((current) => ({
@@ -278,6 +308,17 @@ export default function WorkflowPanel() {
     }))
     setOcrRows(ocrRowsFromWorkflow(items, workflowState))
   }, [discovery, hasDiscovery, items, workflowState])
+
+  useEffect(() => {
+    if (workflowState?.ocr_status === 'complete' && !hasAutoSelectedOcrAfterComplete.current) {
+      hasAutoSelectedOcrAfterComplete.current = true
+      setSelectedStage('ocr')
+      setProgressStage('ocr')
+    }
+    if (workflowState?.ocr_status !== 'complete') {
+      hasAutoSelectedOcrAfterComplete.current = false
+    }
+  }, [workflowState?.ocr_status])
 
   function clearPendingTimer() {
     if (timerId !== null) {
@@ -295,6 +336,7 @@ export default function WorkflowPanel() {
     setMergeRows([])
     setRenameRows([])
     setSelectedSourceId(null)
+    hasAutoSelectedOcrAfterComplete.current = false
     setMessages([{ severity: 'info', code: 'start_running', message: 'Reading configured source folder.' }])
 
     try {
@@ -332,7 +374,6 @@ export default function WorkflowPanel() {
     }
 
     clearPendingTimer()
-    setSelectedStage('ocr')
     setProgressStage('ocr')
     setStageStates((current) => ({ ...current, ocr: 'running' }))
     setMessages([{ severity: 'info', code: 'ocr_starting', message: 'Starting OCR.' }])
@@ -400,6 +441,9 @@ export default function WorkflowPanel() {
   }
 
   function handleStageClick(stage: WorkflowStageKey) {
+    if (isStageRunning) {
+      return
+    }
     setProgressStage(stage)
     if (stage === 'start') {
       void runStart()
@@ -424,6 +468,7 @@ export default function WorkflowPanel() {
           <div className="workflow-stage-grid">
             {STAGES.map((stage, index) => {
               const state = selectedStage === stage.key ? 'selected' : stageStates[stage.key]
+              const isDisabled = isStageRunning || stageStates[stage.key] === 'unavailable'
               const nextStage = STAGES[index + 1]?.key
               const outgoingState = nextStage ? connectorState(stage.key, nextStage, stageStates) : 'none'
               const lines = stageStatusLines({
@@ -441,10 +486,11 @@ export default function WorkflowPanel() {
                 >
                   <button
                     type="button"
+                    disabled={isDisabled}
                     onClick={() => handleStageClick(stage.key)}
                     className={`workflow-stage workflow-stage-${state} ${stageButtonFillClass(state)}`}
                     aria-pressed={selectedStage === stage.key}
-                    aria-disabled={stageStates[stage.key] === 'unavailable'}
+                    aria-disabled={isDisabled}
                   >
                     <span>{stage.label}</span>
                   </button>
@@ -475,6 +521,7 @@ export default function WorkflowPanel() {
             renameRows={renameRows}
             onSelectSource={setSelectedSourceId}
             workflowState={workflowState}
+            isStageRunning={isStageRunning}
           />
         </section>
         <section className="workflow-panel workflow-preview-panel">
@@ -539,6 +586,7 @@ function LeftPanel({
   renameRows,
   onSelectSource,
   workflowState,
+  isStageRunning,
 }: {
   selectedStage: WorkflowStageKey
   items: WorkflowSourceFile[]
@@ -548,6 +596,7 @@ function LeftPanel({
   renameRows: RenameRow[]
   onSelectSource: (id: string) => void
   workflowState: WorkflowState | null
+  isStageRunning: boolean
 }) {
   if (selectedStage === 'start') {
     if (items.length === 0) {
@@ -555,19 +604,37 @@ function LeftPanel({
     }
     return (
       <div className="workflow-scroll-list">
-        {items.map((item) => (
-          <button
-            type="button"
-            key={item.id}
-            onClick={() => onSelectSource(item.id)}
-            className={`workflow-row ${selectedSourceId === item.id ? 'workflow-row-selected' : ''} ${workflowState?.current_item?.source_id === item.id ? 'workflow-row-active-ocr' : ''} ${workflowState?.active_comparison?.left_source_id === item.id || workflowState?.active_comparison?.right_source_id === item.id ? 'workflow-row-active-comparison' : ''}`}
-          >
-            <span className="workflow-row-title">{item.display_name}</span>
-            <span className="workflow-row-subtitle">
-              {item.source_type.toUpperCase()} · {formatBytes(item.size_bytes)}
-            </span>
-          </button>
-        ))}
+        {items.map((item) => {
+          const itemStatus = sourceOcrStatus(item, workflowState)
+          const isRunningItem = itemStatus === 'running'
+          const isDoneItem = itemStatus === 'done'
+          const isFailedItem = itemStatus === 'failed'
+          const isSelected = selectedSourceId === item.id && !isStageRunning
+
+          return (
+            <button
+              type="button"
+              key={item.id}
+              aria-disabled={isStageRunning}
+              tabIndex={isStageRunning ? -1 : 0}
+              onClick={() => onSelectSource(item.id)}
+              className={`workflow-row ${isStageRunning ? 'workflow-row-disabled' : ''} ${isSelected ? 'workflow-row-selected' : ''} ${isRunningItem ? 'workflow-row-active-ocr' : ''} ${isDoneItem ? 'workflow-row-done' : ''} ${isFailedItem ? 'workflow-row-failed' : ''} ${workflowState?.active_comparison?.left_source_id === item.id || workflowState?.active_comparison?.right_source_id === item.id ? 'workflow-row-active-comparison' : ''}`}
+            >
+              <span className="workflow-row-title">{item.display_name}</span>
+              <span className="workflow-row-subtitle">
+                {item.source_type.toUpperCase()} · {formatBytes(item.size_bytes)}
+              </span>
+              {itemStatus ? (
+                <span
+                  className={`workflow-row-process-status workflow-row-process-status-${itemStatus}`}
+                  style={{ color: sourceOcrStatusColor(itemStatus) }}
+                >
+                  {itemStatus}
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
       </div>
     )
   }

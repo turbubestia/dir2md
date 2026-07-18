@@ -99,6 +99,7 @@ class WorkflowState(BaseModel):
     counts: WorkflowCounts = Field(default_factory=WorkflowCounts)
     current_item: WorkflowActiveItem | None = None
     active_comparison: WorkflowActiveComparison | None = None
+    completed_item_ids: list[str] = Field(default_factory=list)
     messages: list[WorkflowStatusMessage] = Field(default_factory=list)
     error: WorkflowStatusMessage | None = None
 
