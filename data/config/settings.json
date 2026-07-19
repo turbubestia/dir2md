@@ -13,7 +13,7 @@
     },
     "language_model": {
         "endpoint": "http://192.168.1.147:8081/v1/chat/completions",
-        "model": "qwen3-1.7b",
+        "model": "llama-3.2-1B",
         "timeout_seconds": 120.0,
         "max_retries": 3
     },
