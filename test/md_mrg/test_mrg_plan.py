@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from common.config import AppConfig, ImageSettings, LlamaModelSettings, MdGenSettings, MdMrgSettings, PathSettings, PromptSettings, RuntimeSettings
+from common.config import AppConfig, ConfigValidationError, ImageSettings, LlamaModelSettings, MdGenSettings, MdMrgSettings, PathSettings, PromptSettings, RuntimeSettings
 from common.gateway import TextResponse
+from md_mrg import cli as cli_mod
 from md_mrg.cli import build_parser
 from md_mrg import planner as planner_mod
 
@@ -257,3 +258,94 @@ def test_cli_main_dispatches_plan_mode(tmp_path: Path, monkeypatch: pytest.Monke
 
     assert main() == 0
     assert called["plan"] is True
+
+
+def test_cli_main_dispatches_apply_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    called = {"apply": False}
+
+    def fake_build_cfg(args: SimpleNamespace) -> AppConfig:
+        return _cfg(source_dir)
+
+    def fake_run_apply(source_dir: Path, cfg: AppConfig) -> dict:
+        called["apply"] = True
+        return {"items": []}
+
+    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", fake_build_cfg)
+    monkeypatch.setattr(cli_mod, "run_apply", fake_run_apply)
+    monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--apply"])
+
+    assert cli_mod.main() == 0
+    assert called["apply"] is True
+
+
+def test_cli_main_accepts_apply_overwrite_and_passes_to_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    seen_overwrite: list[bool] = []
+
+    def fake_build_cfg(args: SimpleNamespace) -> AppConfig:
+        seen_overwrite.append(args.overwrite)
+        return _cfg(source_dir)
+
+    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", fake_build_cfg)
+    monkeypatch.setattr(cli_mod, "run_apply", lambda source_dir, cfg: {"items": []})
+    monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--apply", "--overwrite"])
+
+    assert cli_mod.main() == 0
+    assert seen_overwrite == [True]
+
+
+def test_cli_main_prints_verbose_config_before_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+
+    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", lambda args: _cfg(source_dir))
+    monkeypatch.setattr(cli_mod, "format_config_dump", lambda config, command: f"dump for {command}")
+    monkeypatch.setattr(cli_mod, "run_plan", lambda source_dir, cfg: {"documents": []})
+    monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--plan", "--verbose"])
+
+    assert cli_mod.main() == 0
+    assert capsys.readouterr().out == "dump for md-mrg\n"
+
+
+def test_cli_main_returns_config_error_code(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    def fail_build_cfg(args: SimpleNamespace) -> AppConfig:
+        raise ConfigValidationError("bad_config", "bad config")
+
+    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", fail_build_cfg)
+    monkeypatch.setattr("sys.argv", ["md-mrg", "--source", "ignored", "--plan"])
+
+    assert cli_mod.main() == 2
+    assert "ERROR code=bad_config message=bad config" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("error_factory", (planner_mod.PlannerError, cli_mod.ApplyError))
+def test_cli_main_returns_workflow_error_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error_factory,
+) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+
+    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", lambda args: _cfg(source_dir))
+    monkeypatch.setattr(cli_mod, "run_plan", lambda source_dir, cfg: (_ for _ in ()).throw(error_factory("workflow_failed", "failed")))
+    monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--plan"])
+
+    assert cli_mod.main() == 1
+    assert "ERROR code=workflow_failed message=failed" in capsys.readouterr().out
+
+
+def test_cli_main_returns_runtime_error_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+
+    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", lambda args: _cfg(source_dir))
+    monkeypatch.setattr(cli_mod, "run_apply", lambda source_dir, cfg: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--apply"])
+
+    assert cli_mod.main() == 1
+    assert "ERROR code=md_mrg_runtime_error message=RuntimeError: boom" in capsys.readouterr().out

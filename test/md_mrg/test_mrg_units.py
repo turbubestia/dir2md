@@ -9,7 +9,7 @@ from md_mrg import apply as apply_mod
 from md_mrg import planner as planner_mod
 
 
-def _cfg(source_dir: Path) -> AppConfig:
+def _cfg(source_dir: Path, *, overwrite: bool = False) -> AppConfig:
     prompt_file = source_dir / "prompt.md"
     prompt_file.write_text("score prompt", encoding="utf-8")
     return AppConfig(
@@ -36,17 +36,17 @@ def _cfg(source_dir: Path) -> AppConfig:
                 summary_prompt_text="score prompt",
             ),
         ),
-        runtime=RuntimeSettings(dry_run=False, overwrite=False),
+        runtime=RuntimeSettings(dry_run=False, overwrite=overwrite),
     )
 
 
-def _image_doc(stem: str) -> dict:
+def _image_doc(stem: str, *, summary: str = "") -> dict:
     return {
         "source_file_name": f"{stem}.jpg",
         "file_type": "image",
         "page_count": 1,
         "date_of_process": "2026-07-14T08:21:54.244888+00:00",
-        "summary": "summary",
+        "summary": summary,
         "markdown_file": f"{stem}.md",
         "status": "ok",
     }
@@ -107,9 +107,10 @@ def test_apply_writes_deterministic_outputs_and_deletes_only_group_markdown(tmp_
 
     out = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
 
-    assert (source_dir / "merger-001.md").exists()
-    assert (source_dir / "merged-001.pdf").exists()
-    merged_markdown = (source_dir / "merger-001.md").read_text(encoding="utf-8")
+    assert (source_dir / "doc_merged_001.md").exists()
+    assert (source_dir / "doc_merged_001.pdf").exists()
+    merged_markdown = (source_dir / "doc_merged_001.md").read_text(encoding="utf-8")
+    assert merged_markdown.startswith("# Abstract\n\n\n\n---\n\n")
     assert "Page A" in merged_markdown
     assert "Page B" in merged_markdown
 
@@ -124,7 +125,13 @@ def test_apply_writes_deterministic_outputs_and_deletes_only_group_markdown(tmp_
     payload = json.loads(result_file.read_text(encoding="utf-8"))
     assert payload == out
     assert payload["items"][0]["status"] == "ok"
+    assert payload["items"][0]["output_pdf"] == "doc_merged_001.pdf"
+    assert payload["items"][0]["output_markdown"] == "doc_merged_001.md"
+    assert payload["items"][0]["summary"] == ""
     assert payload["items"][1]["item_type"] == "pdf"
+    assert payload["items"][1]["output_pdf"] == "done.pdf"
+    assert payload["items"][1]["output_markdown"] == "done.md"
+    assert payload["items"][1]["summary"] == "done"
 
 
 def test_apply_continues_after_failed_group(tmp_path: Path) -> None:
@@ -155,8 +162,8 @@ def test_apply_continues_after_failed_group(tmp_path: Path) -> None:
 
     assert payload["items"][0]["status"] == "failed"
     assert payload["items"][1]["status"] == "ok"
-    assert (source_dir / "merged-002.pdf").exists()
-    assert (source_dir / "merger-002.md").exists()
+    assert (source_dir / "doc_merged_002.pdf").exists()
+    assert (source_dir / "doc_merged_002.md").exists()
 
 
 def test_apply_accepts_reordered_singleton_and_multiple_image_groups(tmp_path: Path) -> None:
@@ -184,8 +191,177 @@ def test_apply_accepts_reordered_singleton_and_multiple_image_groups(tmp_path: P
     assert [item["status"] for item in payload["items"]] == ["ok", "ok"]
     assert payload["items"][0]["documents"] == [page_b, page_a]
     assert payload["items"][1]["documents"] == [page_c]
-    assert (source_dir / "merged-001.pdf").exists()
-    assert (source_dir / "merged-002.pdf").exists()
+    assert (source_dir / "doc_merged_001.pdf").exists()
+    assert (source_dir / "doc_merged_002.pdf").exists()
+
+
+def test_build_abstract_markdown_prepends_exact_block_and_preserves_existing_abstract() -> None:
+    body = "# Abstract\n\nOriginal abstract\n\n# Body\n\nText"
+
+    assert apply_mod._build_abstract_markdown("Normalized summary", body) == (
+        "# Abstract\n\n"
+        "Normalized summary\n\n"
+        "---\n\n"
+        "# Abstract\n\n"
+        "Original abstract\n\n"
+        "# Body\n\n"
+        "Text\n"
+    )
+
+
+def test_apply_pdf_item_uses_source_pdf_name_markdown_name_and_summary_without_gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    pdf_doc = {
+        "source_file_name": "my_file.pdf",
+        "file_type": "pdf",
+        "page_count": 3,
+        "date_of_process": "2026-07-14T08:21:54.244888+00:00",
+        "summary": "PDF summary",
+        "markdown_file": "ocr-output.md",
+        "status": "ok",
+    }
+    (source_dir / "my_file.pdf").write_bytes(b"%PDF-1.4")
+    (source_dir / "ocr-output.md").write_text("PDF body", encoding="utf-8")
+    (source_dir / "batch_mrg.json").write_text(json.dumps({"documents": [pdf_doc]}), encoding="utf-8")
+
+    def fail_summary(*args, **kwargs):
+        raise AssertionError("PDF-backed items must not request language summaries")
+
+    monkeypatch.setattr(apply_mod, "summarize_document", fail_summary, raising=False)
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert payload["items"] == [
+        {
+            "item_index": 1,
+            "item_type": "pdf",
+            "status": "ok",
+            "output_pdf": "my_file.pdf",
+            "output_markdown": "my_file.md",
+            "summary": "PDF summary",
+            "document": pdf_doc,
+        }
+    ]
+    assert (source_dir / "my_file.md").read_text(encoding="utf-8") == "# Abstract\n\nPDF summary\n\n---\n\nPDF body\n"
+
+
+def test_apply_group_summary_skips_blank_summaries_and_preserves_plan_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    page_a = _write_image_and_markdown(source_dir, "page-a", "Page A")
+    page_b = _write_image_and_markdown(source_dir, "page-b", "Page B")
+    page_c = _write_image_and_markdown(source_dir, "page-c", "Page C")
+    page_a["summary"] = "Summary A"
+    page_b["summary"] = "   "
+    page_c["summary"] = "Summary C"
+    seen_summaries: list[list[str]] = []
+
+    def fake_summarize_document(config: AppConfig, page_summaries: list[str]) -> str:
+        seen_summaries.append(page_summaries)
+        return "Group summary"
+
+    monkeypatch.setattr(apply_mod, "summarize_document", fake_summarize_document, raising=False)
+    (source_dir / "batch_mrg.json").write_text(
+        json.dumps({"documents": [{"documents": [page_c, page_b, page_a]}]}),
+        encoding="utf-8",
+    )
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert seen_summaries == [["Summary C", "Summary A"]]
+    assert payload["items"][0]["summary"] == "Group summary"
+    assert (source_dir / "doc_merged_001.md").read_text(encoding="utf-8").startswith("# Abstract\n\nGroup summary\n\n---\n\n")
+
+
+def test_apply_result_summary_matches_persisted_abstract(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    pdf_doc = {
+        "source_file_name": "result.pdf",
+        "file_type": "pdf",
+        "page_count": 1,
+        "date_of_process": "2026-07-14T08:21:54.244888+00:00",
+        "summary": "Persisted summary",
+        "markdown_file": "result-source.md",
+        "status": "ok",
+    }
+    (source_dir / "result.pdf").write_bytes(b"%PDF-1.4")
+    (source_dir / "result-source.md").write_text("Body", encoding="utf-8")
+    (source_dir / "batch_mrg.json").write_text(json.dumps({"documents": [pdf_doc]}), encoding="utf-8")
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    item = payload["items"][0]
+    persisted = (source_dir / item["output_markdown"]).read_text(encoding="utf-8")
+    assert item["output_pdf"] == "result.pdf"
+    assert item["output_markdown"] == "result.md"
+    assert item["summary"] == "Persisted summary"
+    assert persisted.startswith(f"# Abstract\n\n{item['summary']}\n\n---\n\n")
+
+
+def test_apply_rejects_existing_outputs_unless_overwrite_enabled(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    pdf_doc = {
+        "source_file_name": "collision.pdf",
+        "file_type": "pdf",
+        "page_count": 1,
+        "date_of_process": "2026-07-14T08:21:54.244888+00:00",
+        "summary": "New summary",
+        "markdown_file": "collision-source.md",
+        "status": "ok",
+    }
+    (source_dir / "collision.pdf").write_bytes(b"%PDF-1.4")
+    (source_dir / "collision-source.md").write_text("New body", encoding="utf-8")
+    (source_dir / "collision.md").write_text("old", encoding="utf-8")
+    (source_dir / "batch_mrg.json").write_text(json.dumps({"documents": [pdf_doc]}), encoding="utf-8")
+
+    with pytest.raises(apply_mod.ApplyError) as exc:
+        apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert exc.value.error_code == "output_collision"
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir, overwrite=True))
+    assert payload["items"][0]["status"] == "ok"
+    assert (source_dir / "collision.md").read_text(encoding="utf-8").startswith("# Abstract\n\nNew summary\n\n---\n\n")
+
+
+def test_apply_rejects_existing_result_file_without_overwrite(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    (source_dir / "batch_mrg.json").write_text(json.dumps({"documents": []}), encoding="utf-8")
+    (source_dir / "batch_mrg_result.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(apply_mod.ApplyError) as exc:
+        apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert exc.value.error_code == "output_collision"
+
+
+def test_apply_rejects_duplicate_planned_outputs_before_partial_writes(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    first = {
+        "source_file_name": "same.pdf",
+        "file_type": "pdf",
+        "page_count": 1,
+        "date_of_process": "2026-07-14T08:21:54.244888+00:00",
+        "summary": "one",
+        "markdown_file": "same-a.md",
+        "status": "ok",
+    }
+    second = {**first, "summary": "two", "markdown_file": "same-b.md"}
+    (source_dir / "same.pdf").write_bytes(b"%PDF-1.4")
+    (source_dir / "same-a.md").write_text("A", encoding="utf-8")
+    (source_dir / "same-b.md").write_text("B", encoding="utf-8")
+    (source_dir / "batch_mrg.json").write_text(json.dumps({"documents": [first, second]}), encoding="utf-8")
+
+    with pytest.raises(apply_mod.ApplyError) as exc:
+        apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir, overwrite=True))
+
+    assert exc.value.error_code == "output_cardinality_invalid"
+    assert not (source_dir / "same.md").exists()
 
 
 def test_apply_preserves_mixed_pdf_group_order(tmp_path: Path) -> None:
@@ -234,6 +410,80 @@ def test_apply_reports_empty_group_image_failure(tmp_path: Path) -> None:
             "documents": [],
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("plan_payload", "expected_code"),
+    (
+        ("[]", "plan_invalid_shape"),
+        (json.dumps({"documents": "not-a-list"}), "plan_documents_invalid"),
+    ),
+)
+def test_apply_rejects_invalid_plan_payloads(tmp_path: Path, plan_payload: str, expected_code: str) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    (source_dir / "batch_mrg.json").write_text(plan_payload, encoding="utf-8")
+
+    with pytest.raises(apply_mod.ApplyError) as exc:
+        apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert exc.value.error_code == expected_code
+
+
+def test_apply_accepts_null_documents_as_empty_plan(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    (source_dir / "batch_mrg.json").write_text(json.dumps({"documents": None}), encoding="utf-8")
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert payload == {"items": []}
+    assert json.loads((source_dir / "batch_mrg_result.json").read_text(encoding="utf-8")) == payload
+
+
+def test_apply_reports_missing_group_markdown_field(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    (source_dir / "batch_mrg.json").write_text(
+        json.dumps({"documents": [{"documents": [{"source_file_name": "scan.jpg"}]}]}),
+        encoding="utf-8",
+    )
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert payload["items"][0]["status"] == "failed"
+    assert payload["items"][0]["error_code"] == "group_markdown_missing"
+
+
+def test_apply_reports_missing_group_image_field(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    (source_dir / "page.md").write_text("page", encoding="utf-8")
+    (source_dir / "batch_mrg.json").write_text(
+        json.dumps({"documents": [{"documents": [{"markdown_file": "page.md"}]}]}),
+        encoding="utf-8",
+    )
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert payload["items"][0]["status"] == "failed"
+    assert payload["items"][0]["error_code"] == "group_image_missing"
+
+
+def test_apply_reports_unreadable_group_image(tmp_path: Path) -> None:
+    source_dir = tmp_path / "out"
+    source_dir.mkdir()
+    (source_dir / "page.md").write_text("page", encoding="utf-8")
+    (source_dir / "page.jpg").write_text("not an image", encoding="utf-8")
+    (source_dir / "batch_mrg.json").write_text(
+        json.dumps({"documents": [{"documents": [{"source_file_name": "page.jpg", "markdown_file": "page.md"}]}]}),
+        encoding="utf-8",
+    )
+
+    payload = apply_mod.run_apply(source_dir=source_dir, cfg=_cfg(source_dir))
+
+    assert payload["items"][0]["status"] == "failed"
+    assert payload["items"][0]["error_code"] == "group_image_read_failed"
 
 
 def test_apply_raises_for_missing_plan_file(tmp_path: Path) -> None:
