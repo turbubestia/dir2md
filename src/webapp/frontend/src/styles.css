@@ -291,6 +291,22 @@
     @apply border-red-600 bg-red-950/30;
   }
 
+  .workflow-merge-row-pending {
+    @apply border-shell-border/70 bg-shell-panel/70;
+  }
+
+  .workflow-merge-row-running {
+    @apply border-sky-300 bg-sky-950/50;
+  }
+
+  .workflow-merge-row-done {
+    @apply border-emerald-600 bg-emerald-950/30;
+  }
+
+  .workflow-merge-row-failed {
+    @apply border-red-600 bg-red-950/30;
+  }
+
   .workflow-row-active-comparison {
     @apply border-amber-300 bg-amber-950/40;
   }

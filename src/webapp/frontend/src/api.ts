@@ -6,6 +6,8 @@ import type {
   MarkdownPreviewResponse,
   ValidationError,
   WorkflowDiscoveryResponse,
+  WorkflowMergeResultItem,
+  WorkflowMergeResultsResponse,
   WorkflowState,
   WorkflowSourceFile,
 } from './types'
@@ -122,6 +124,32 @@ export async function saveEditableMergePlan(
   return response.json()
 }
 
+export async function startWorkflowMerge(plan: EditableMergePlan): Promise<WorkflowState> {
+  const response = await fetch(`${API_BASE}/api/workflow/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ plan }),
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Workflow merge failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export async function fetchMergeResults(): Promise<WorkflowMergeResultsResponse> {
+  const response = await fetch(`${API_BASE}/api/workflow/merge-results`)
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Merge results load failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
 export function buildSourcePreviewUrl(
   item: WorkflowSourceFile,
 ): string | undefined {
@@ -134,6 +162,10 @@ export function buildOcrArtifactPreviewUrl(
   return `${API_BASE}/api/workflow/ocr-preview/${encodeURIComponent(item.id)}`
 }
 
+export function buildMergeResultPdfPreviewUrl(item: WorkflowMergeResultItem): string {
+  return `${API_BASE}/api/workflow/merge-result-preview/${encodeURIComponent(item.id)}`
+}
+
 export async function fetchMarkdownPreview(
   item: EditableImagePage | EditablePdfDocument,
 ): Promise<MarkdownPreviewResponse> {
@@ -142,6 +174,17 @@ export async function fetchMarkdownPreview(
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(body.detail || `Markdown preview failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export async function fetchMergeResultMarkdown(item: WorkflowMergeResultItem): Promise<MarkdownPreviewResponse> {
+  const response = await fetch(`${API_BASE}/api/workflow/merge-result-markdown/${encodeURIComponent(item.id)}`)
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `Merge Markdown preview failed (${response.status})`)
   }
 
   return response.json()

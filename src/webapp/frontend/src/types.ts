@@ -126,20 +126,39 @@ export interface WorkflowCounts {
 }
 
 export interface WorkflowProgress {
-  stage: 'idle' | 'ocr' | 'planning'
+  stage: 'idle' | 'ocr' | 'planning' | 'merge'
   total_jobs: number
   completed_jobs: number
   percent: number
 }
 
+export type MergeItemStatus = 'pending' | 'running' | 'done' | 'failed'
+
+export interface WorkflowMergeItem {
+  id: string
+  label: string
+  item_type: 'pdf' | 'group'
+  item_index: number
+  status: MergeItemStatus
+  output_pdf: string | null
+  output_markdown: string | null
+  error_code: string | null
+  message: string | null
+}
+
 export interface WorkflowState {
   discovery: WorkflowDiscoveryResponse | null
   ocr_status: WorkflowStageStatus
+  merge_status: WorkflowStageStatus
   progress: WorkflowProgress
   counts: WorkflowCounts
   current_item: WorkflowActiveItem | null
   active_comparison: WorkflowActiveComparison | null
   completed_item_ids: string[]
+  active_merge_item_id: string | null
+  merge_items: WorkflowMergeItem[]
+  merge_results_available: boolean
+  merge_result_error: WorkflowStatusMessage | null
   messages: WorkflowStatusMessage[]
   error: WorkflowStatusMessage | null
 }
@@ -203,11 +222,23 @@ export interface OcrTreeRow {
   source_id: string
 }
 
-export interface MergeRow {
+export interface WorkflowMergeResultItem {
   id: string
-  title: string
-  item_count: number
-  status: 'pending' | 'simulated'
+  item_index: number
+  item_type: 'pdf' | 'group'
+  status: 'ok' | 'failed'
+  label: string
+  output_pdf: string | null
+  output_markdown: string | null
+  summary: string | null
+  document: Record<string, unknown> | null
+  documents: Record<string, unknown>[] | null
+  error_code: string | null
+  message: string | null
+}
+
+export interface WorkflowMergeResultsResponse {
+  items: WorkflowMergeResultItem[]
 }
 
 export interface RenameRow {

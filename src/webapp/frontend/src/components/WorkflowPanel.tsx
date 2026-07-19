@@ -12,13 +12,16 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import {
   WORKFLOW_EVENTS_URL,
+  buildMergeResultPdfPreviewUrl,
   buildOcrArtifactPreviewUrl,
   buildSourcePreviewUrl,
   fetchEditableMergePlan,
+  fetchMergeResultMarkdown,
+  fetchMergeResults,
   fetchMarkdownPreview,
   fetchWorkflowState,
-  saveEditableMergePlan,
   startWorkflowDiscovery,
+  startWorkflowMerge,
   startWorkflowOcr,
 } from '../api'
 import type {
@@ -29,10 +32,11 @@ import type {
   EditableMergePlan,
   EditablePlanDocument,
   EditablePlanItem,
-  MergeRow,
   MarkdownPreviewResponse,
   RenameRow,
   WorkflowDiscoveryResponse,
+  WorkflowMergeItem,
+  WorkflowMergeResultItem,
   WorkflowState,
   WorkflowSourceFile,
   WorkflowStageKey,
@@ -122,7 +126,7 @@ function stageStatusLines({
   hasDiscovery: boolean
   metrics: typeof EMPTY_METRICS
   workflowState: WorkflowState | null
-  mergeRows: MergeRow[]
+  mergeRows: WorkflowMergeResultItem[]
   renameRows: RenameRow[]
 }): StageStatusLine[] {
   if (stage === 'start') {
@@ -142,7 +146,8 @@ function stageStatusLines({
   }
 
   if (stage === 'merge') {
-    return [{ label: 'Documents', value: mergeRows.length > 0 ? String(mergeRows.length) : '-' }]
+    const itemCount = mergeRows.length || workflowState?.merge_items.length || 0
+    return [{ label: 'Documents', value: itemCount > 0 ? String(itemCount) : '-' }]
   }
 
   return [{ label: 'Documents', value: renameRows.length > 0 ? String(renameRows.length) : '-' }]
@@ -220,6 +225,39 @@ function ocrStageState(workflowState: WorkflowState | null, hasDiscovery: boolea
     return 'failed'
   }
   return 'enabled'
+}
+
+function mergeStageState(workflowState: WorkflowState | null): WorkflowStageState {
+  if (workflowState?.ocr_status !== 'complete') {
+    return 'unavailable'
+  }
+  if (workflowState.merge_status === 'running') {
+    return 'running'
+  }
+  if (workflowState.merge_status === 'complete') {
+    return 'complete'
+  }
+  if (workflowState.merge_status === 'failed') {
+    return 'failed'
+  }
+  return 'enabled'
+}
+
+function mergeStatusLabel(status: WorkflowMergeItem['status']): string {
+  if (status === 'done') {
+    return 'done'
+  }
+  return status
+}
+
+function mergeStatusColor(status: WorkflowMergeItem['status']): string {
+  if (status === 'done') {
+    return '#6ee7b7'
+  }
+  if (status === 'failed') {
+    return '#fca5a5'
+  }
+  return '#94a3b8'
 }
 
 function isImageGroup(item: EditablePlanItem): item is EditableImageGroup {
@@ -327,7 +365,8 @@ export default function WorkflowPanel() {
   const [markdownPreviewStatus, setMarkdownPreviewStatus] = useState<MarkdownPreviewStatus>('idle')
   const [markdownViewMode, setMarkdownViewMode] = useState<MarkdownViewMode>('preview')
   const [messages, setMessages] = useState<WorkflowStatusMessage[]>([])
-  const [mergeRows, setMergeRows] = useState<MergeRow[]>([])
+  const [mergeRows, setMergeRows] = useState<WorkflowMergeResultItem[]>([])
+  const [selectedMergeResultId, setSelectedMergeResultId] = useState<string | null>(null)
   const [renameRows, setRenameRows] = useState<RenameRow[]>([])
   const [timerId, setTimerId] = useState<number | null>(null)
   const hasAutoSelectedOcrAfterComplete = useRef(false)
@@ -371,6 +410,27 @@ export default function WorkflowPanel() {
       }
     }
 
+    async function loadMergeResults() {
+      try {
+        const results = await fetchMergeResults()
+        if (cancelled) {
+          return
+        }
+        setMergeRows(results.items)
+        setSelectedMergeResultId((current) => current ?? results.items.find((item) => item.status === 'ok')?.id ?? results.items[0]?.id ?? null)
+      } catch (error) {
+        if (!cancelled) {
+          setMessages([
+            {
+              severity: 'error',
+              code: 'merge_results_load_failed',
+              message: error instanceof Error ? error.message : 'Merge results could not be loaded.',
+            },
+          ])
+        }
+      }
+    }
+
     function applyState(nextState: WorkflowState) {
       if (cancelled) {
         return
@@ -383,6 +443,13 @@ export default function WorkflowPanel() {
       setMessages(nextState.messages)
       if (nextState.ocr_status === 'complete') {
         void loadPlanAfterComplete()
+      }
+      if (nextState.merge_status === 'running') {
+        setSelectedStage('merge')
+        setProgressStage('merge')
+      }
+      if (nextState.merge_results_available) {
+        void loadMergeResults()
       }
     }
 
@@ -422,14 +489,18 @@ export default function WorkflowPanel() {
   const selectedSource =
     items.find((item) => item.id === selectedSourceId) ?? items[0] ?? null
   const selectedPlanItem = findPlanDocument(editablePlan, selectedPlanItemId)
+  const selectedMergeResult = mergeRows.find((item) => item.id === selectedMergeResultId) ?? null
   const metrics = discovery?.metrics ?? EMPTY_METRICS
   const hasDiscovery = discovery !== null
-  const progressPercent = workflowState?.ocr_status === 'complete'
+  const progressPercent = workflowState?.merge_status === 'running'
+    ? stageProgressPercent('merge')
+    : workflowState?.ocr_status === 'complete'
     ? 100
     : workflowState?.ocr_status === 'running'
       ? workflowState.progress.percent
       : stageProgressPercent(progressStage)
   const isStageRunning = workflowState?.ocr_status === 'running'
+    || workflowState?.merge_status === 'running'
     || Object.values(stageStates).some((state) => state === 'running')
 
   useEffect(() => {
@@ -437,14 +508,42 @@ export default function WorkflowPanel() {
       ...current,
       start: discovery?.ok ? 'complete' : 'enabled',
       ocr: ocrStageState(workflowState, hasDiscovery),
-      merge: workflowState?.ocr_status === 'complete'
-        ? current.merge === 'complete' ? 'complete' : 'enabled'
-        : 'unavailable',
-      rename: current.rename === 'complete' ? 'complete' : current.rename,
+      merge: mergeStageState(workflowState),
+      rename: workflowState?.merge_status === 'complete' && workflowState.merge_results_available
+        ? current.rename === 'complete' ? 'complete' : 'enabled'
+        : current.rename === 'complete' ? 'complete' : 'unavailable',
     }))
   }, [discovery, hasDiscovery, items, workflowState])
 
   useEffect(() => {
+    if (selectedStage === 'merge') {
+      if (!selectedMergeResult || selectedMergeResult.status !== 'ok') {
+        setMarkdownPreview(null)
+        setMarkdownPreviewStatus('idle')
+        return
+      }
+
+      let cancelled = false
+      setMarkdownPreview(null)
+      setMarkdownPreviewStatus('loading')
+      void fetchMergeResultMarkdown(selectedMergeResult)
+        .then((preview) => {
+          if (!cancelled) {
+            setMarkdownPreview(preview)
+            setMarkdownPreviewStatus('ready')
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setMarkdownPreviewStatus('error')
+          }
+        })
+
+      return () => {
+        cancelled = true
+      }
+    }
+
     if (selectedStage !== 'ocr' || !selectedPlanItem) {
       setMarkdownPreview(null)
       setMarkdownPreviewStatus('idle')
@@ -470,7 +569,7 @@ export default function WorkflowPanel() {
     return () => {
       cancelled = true
     }
-  }, [selectedPlanItem, selectedStage])
+  }, [selectedMergeResult, selectedPlanItem, selectedStage])
 
   useEffect(() => {
     if (!dragState) {
@@ -522,6 +621,7 @@ export default function WorkflowPanel() {
     setMarkdownPreview(null)
     setMarkdownPreviewStatus('idle')
     setMergeRows([])
+    setSelectedMergeResultId(null)
     setRenameRows([])
     setSelectedSourceId(null)
     hasAutoSelectedOcrAfterComplete.current = false
@@ -570,6 +670,8 @@ export default function WorkflowPanel() {
     setSelectedPlanItemId(null)
     setMarkdownPreview(null)
     setMarkdownPreviewStatus('idle')
+    setMergeRows([])
+    setSelectedMergeResultId(null)
     planLoadRequested.current = false
     setMessages([{ severity: 'info', code: 'ocr_starting', message: 'Starting OCR.' }])
 
@@ -589,7 +691,7 @@ export default function WorkflowPanel() {
     }
   }
 
-  function runSimulatedStage(stage: Exclude<WorkflowStageKey, 'start' | 'ocr'>) {
+  function runSimulatedStage(stage: Exclude<WorkflowStageKey, 'start' | 'ocr' | 'merge'>) {
     const label = STAGES.find((candidate) => candidate.key === stage)?.label ?? stage
     if (stageStates[stage] === 'unavailable') {
       setMessages([nextWarning(label)])
@@ -605,17 +707,6 @@ export default function WorkflowPanel() {
     setMessages([{ severity: 'info', code: `${stage}_running`, message: `${label} simulation is running.` }])
 
     const nextTimerId = window.setTimeout(() => {
-      if (stage === 'merge') {
-        setMergeRows([
-          {
-            id: 'merge-preview',
-            title: 'Simulated document group',
-            item_count: editablePlan?.items.length ?? items.length,
-            status: 'simulated',
-          },
-        ])
-        setStageStates((current) => ({ ...current, merge: 'complete', rename: 'enabled' }))
-      }
       if (stage === 'rename') {
         setRenameRows([
           {
@@ -650,22 +741,25 @@ export default function WorkflowPanel() {
 
     clearPendingTimer()
     setSelectedStage('merge')
+    setProgressStage('merge')
     setStageStates((current) => ({ ...current, merge: 'running' }))
-    setMessages([{ severity: 'info', code: 'merge_plan_saving', message: 'Saving editable merge plan.' }])
+    setMergeRows([])
+    setSelectedMergeResultId(null)
+    setMarkdownPreview(null)
+    setMarkdownPreviewStatus('idle')
+    setMessages([{ severity: 'info', code: 'merge_starting', message: 'Starting merge.' }])
 
     try {
-      const savedPlan = await saveEditableMergePlan(editablePlan)
-      setEditablePlan(savedPlan)
-      setExpandedGroupIds(new Set(savedPlan.items.filter(isImageGroup).map((item) => item.id)))
-      setSelectedPlanItemId((current) => findPlanDocument(savedPlan, current)?.id ?? planDocuments(savedPlan)[0]?.id ?? null)
-      runSimulatedStage('merge')
+      const state = await startWorkflowMerge(editablePlan)
+      setWorkflowState(state)
+      setMessages(state.messages)
     } catch (error) {
       setStageStates((current) => ({ ...current, merge: 'enabled' }))
       setMessages([
         {
           severity: 'error',
-          code: 'merge_plan_save_failed',
-          message: error instanceof Error ? error.message : 'Editable merge plan could not be saved.',
+          code: 'merge_failed',
+          message: error instanceof Error ? error.message : 'Merge could not be started.',
         },
       ])
     }
@@ -757,9 +851,11 @@ export default function WorkflowPanel() {
             dragState={dragState}
             dropTarget={dropTarget}
             mergeRows={mergeRows}
+            selectedMergeResultId={selectedMergeResultId}
             renameRows={renameRows}
             onSelectSource={setSelectedSourceId}
             onSelectPlanItem={setSelectedPlanItemId}
+            onSelectMergeResult={setSelectedMergeResultId}
             onToggleGroup={(groupId) => {
               setExpandedGroupIds((current) => {
                 const next = new Set(current)
@@ -802,7 +898,7 @@ export default function WorkflowPanel() {
         </section>
         <section className="workflow-panel workflow-preview-panel">
           <h3 className="workflow-panel-title">Document preview</h3>
-          <MiddlePanel selectedStage={selectedStage} selectedSource={selectedSource} selectedPlanItem={selectedPlanItem} />
+          <MiddlePanel selectedStage={selectedStage} selectedSource={selectedSource} selectedPlanItem={selectedPlanItem} selectedMergeResult={selectedMergeResult} />
         </section>
         <section className="workflow-panel workflow-preview-panel">
           <div className="workflow-panel-heading">
@@ -825,6 +921,7 @@ export default function WorkflowPanel() {
             selectedStage={selectedStage}
             selectedSource={selectedSource}
             selectedPlanItem={selectedPlanItem}
+            selectedMergeResult={selectedMergeResult}
             markdownPreview={markdownPreview}
             markdownPreviewStatus={markdownPreviewStatus}
             markdownViewMode={markdownViewMode}
@@ -879,12 +976,14 @@ function LeftPanel({
   editablePlan,
   expandedGroupIds,
   selectedPlanItemId,
+  selectedMergeResultId,
   dragState,
   dropTarget,
   mergeRows,
   renameRows,
   onSelectSource,
   onSelectPlanItem,
+  onSelectMergeResult,
   onToggleGroup,
   onDragStart,
   onDropTargetChange,
@@ -899,12 +998,14 @@ function LeftPanel({
   editablePlan: EditableMergePlan | null
   expandedGroupIds: Set<string>
   selectedPlanItemId: string | null
+  selectedMergeResultId: string | null
   dragState: DragPageState | null
   dropTarget: DropTarget | null
-  mergeRows: MergeRow[]
+  mergeRows: WorkflowMergeResultItem[]
   renameRows: RenameRow[]
   onSelectSource: (id: string) => void
   onSelectPlanItem: (id: string) => void
+  onSelectMergeResult: (id: string) => void
   onToggleGroup: (groupId: string) => void
   onDragStart: (page: EditableImagePage, groupId: string) => void
   onDropTargetChange: (target: DropTarget | null) => void
@@ -989,17 +1090,59 @@ function LeftPanel({
   }
 
   if (selectedStage === 'merge') {
-    return mergeRows.length > 0 ? (
+    if (workflowState?.merge_results_available && mergeRows.length > 0) {
+      return (
+        <div className="workflow-scroll-list">
+          {mergeRows.map((row) => (
+            <button
+              type="button"
+              key={row.id}
+              disabled={isStageRunning || row.status !== 'ok'}
+              onClick={() => onSelectMergeResult(row.id)}
+              className={`workflow-row ${selectedMergeResultId === row.id ? 'workflow-row-selected' : ''} ${row.status === 'failed' ? 'workflow-row-failed' : 'workflow-row-done'}`}
+            >
+              <span className="workflow-row-title">{row.label}</span>
+              <span className="workflow-row-subtitle">
+                {row.status === 'ok'
+                  ? `${row.output_pdf ?? 'PDF'} · ${row.output_markdown ?? 'Markdown'}`
+                  : row.message ?? 'Merge failed'}
+              </span>
+              <span
+                className={`workflow-row-process-status workflow-row-process-status-${row.status === 'ok' ? 'done' : 'failed'}`}
+                style={{ color: mergeStatusColor(row.status === 'ok' ? 'done' : 'failed') }}
+              >
+                {row.status === 'ok' ? 'done' : 'failed'}
+              </span>
+            </button>
+          ))}
+        </div>
+      )
+    }
+
+    return editablePlan ? (
       <div className="workflow-scroll-list">
-        {mergeRows.map((row) => (
-          <div key={row.id} className="workflow-row-static">
-            <span className="workflow-row-title">{row.title}</span>
-            <span className="workflow-row-subtitle">{row.item_count} item(s), simulated merge</span>
-          </div>
-        ))}
+        {editablePlan.items.map((item, index) => {
+          const mergeItem = workflowState?.merge_items.find((candidate) => candidate.item_index === index + 1)
+          const status = mergeItem?.status ?? 'pending'
+          const label = isImageGroup(item) ? item.display_name : item.source_file_name
+          const detail = isImageGroup(item) ? `${item.documents.length} image page(s)` : item.markdown_file
+          return (
+            <div key={item.id} className={`workflow-row-static workflow-merge-row-${status}`}>
+              <span className="workflow-row-title">{label}</span>
+              <span className="workflow-row-subtitle">{detail}</span>
+              <span
+                className={`workflow-row-process-status workflow-row-process-status-${status}`}
+                style={{ color: mergeStatusColor(status) }}
+              >
+                {mergeStatusLabel(status)}
+              </span>
+              {mergeItem?.message ? <span className="workflow-row-subtitle">{mergeItem.message}</span> : null}
+            </div>
+          )
+        })}
       </div>
     ) : (
-      <EmptyPanel text="Merge groups are frontend-only placeholders for now." />
+      <EmptyPanel text="Merge groups will appear after OCR completes." />
     )
   }
 
@@ -1211,10 +1354,12 @@ function MiddlePanel({
   selectedStage,
   selectedSource,
   selectedPlanItem,
+  selectedMergeResult,
 }: {
   selectedStage: WorkflowStageKey
   selectedSource: WorkflowSourceFile | null
   selectedPlanItem: EditablePlanDocument | null
+  selectedMergeResult: WorkflowMergeResultItem | null
 }) {
   if (selectedStage === 'ocr') {
     if (!selectedPlanItem) {
@@ -1229,6 +1374,16 @@ function MiddlePanel({
       )
     }
     return <PdfPreview fileUrl={previewUrl} />
+  }
+
+  if (selectedStage === 'merge') {
+    if (!selectedMergeResult) {
+      return <EmptyPanel text="Select a merge result to preview its PDF." />
+    }
+    if (selectedMergeResult.status !== 'ok') {
+      return <EmptyPanel text={selectedMergeResult.message ?? 'This merge result failed.'} />
+    }
+    return <PdfPreview fileUrl={buildMergeResultPdfPreviewUrl(selectedMergeResult)} />
   }
 
   if (selectedStage !== 'start') {
@@ -1471,6 +1626,7 @@ function RightPanel({
   selectedStage,
   selectedSource,
   selectedPlanItem,
+  selectedMergeResult,
   markdownPreview,
   markdownPreviewStatus,
   markdownViewMode,
@@ -1478,6 +1634,7 @@ function RightPanel({
   selectedStage: WorkflowStageKey
   selectedSource: WorkflowSourceFile | null
   selectedPlanItem: EditablePlanDocument | null
+  selectedMergeResult: WorkflowMergeResultItem | null
   markdownPreview: MarkdownPreviewResponse | null
   markdownPreviewStatus: MarkdownPreviewStatus
   markdownViewMode: MarkdownViewMode
@@ -1489,6 +1646,49 @@ function RightPanel({
   if (selectedStage === 'ocr') {
     if (!selectedPlanItem) {
       return <EmptyPanel text="Select an OCR item to preview its Markdown." />
+    }
+    if (markdownPreviewStatus === 'loading') {
+      return <EmptyPanel text="Loading Markdown preview..." />
+    }
+    if (markdownPreviewStatus === 'error') {
+      return <EmptyPanel text="Markdown preview could not be loaded." />
+    }
+    const content = markdownPreview?.content || 'Markdown preview is empty.'
+    if (markdownViewMode === 'code') {
+      return (
+        <div className="workflow-markdown-preview workflow-markdown-code-view">
+          <SyntaxHighlighter
+            language="markdown"
+            style={oneDark}
+            customStyle={{ margin: 0, background: 'transparent', padding: 0 }}
+            codeTagProps={{ className: 'workflow-markdown-code' }}
+            wrapLongLines
+          >
+            {content}
+          </SyntaxHighlighter>
+        </div>
+      )
+    }
+    return (
+      <MathJaxContext>
+        <MathJax dynamic className="workflow-markdown-preview workflow-markdown-rendered">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeRaw, [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA], rehypeMathjax]}
+          >
+            {content}
+          </ReactMarkdown>
+        </MathJax>
+      </MathJaxContext>
+    )
+  }
+
+  if (selectedStage === 'merge') {
+    if (!selectedMergeResult) {
+      return <EmptyPanel text="Select a merge result to preview its Markdown." />
+    }
+    if (selectedMergeResult.status !== 'ok') {
+      return <EmptyPanel text={selectedMergeResult.message ?? 'This merge result failed.'} />
     }
     if (markdownPreviewStatus === 'loading') {
       return <EmptyPanel text="Loading Markdown preview..." />

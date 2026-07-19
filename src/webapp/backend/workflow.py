@@ -23,6 +23,7 @@ from common.config import (
 from md_gen import foundation as md_gen_foundation
 from md_gen.discovery import build_work_items
 from md_gen.progress import GenerationProgressEvent
+from md_mrg import apply as md_mrg_apply
 from md_mrg import planner as md_mrg_planner
 from md_mrg.planner import PlannerError, PlanningProgressEvent
 
@@ -35,6 +36,9 @@ from .models import (
     FolderStatus,
     FolderStatusKind,
     MarkdownPreviewResponse,
+    WorkflowMergeItem,
+    WorkflowMergeResultItem,
+    WorkflowMergeResultsResponse,
     WorkflowActiveComparison,
     WorkflowActiveItem,
     WorkflowCounts,
@@ -91,8 +95,8 @@ class WorkflowService:
 
     def save_editable_merge_plan(self, settings: AppSettings, plan: EditableMergePlan) -> EditableMergePlan:
         with self._lock:
-            if self._state.ocr_status == "running":
-                raise WorkflowServiceError("Cannot save the merge plan while OCR is running.", status_code=409)
+            if self._worker is not None and self._worker.is_alive():
+                raise WorkflowServiceError("Cannot save the merge plan while a workflow stage is running.", status_code=409)
 
         output_dir = _resolve_output_dir(settings)
         plan_path = output_dir / md_mrg_planner.MERGE_PLAN_FILE_NAME
@@ -102,6 +106,63 @@ class WorkflowService:
         payload = _payload_from_editable_plan(plan)
         _write_json_atomic(plan_path, payload)
         return _editable_plan_from_payload(_load_merge_plan_payload(output_dir))
+
+    def start_merge(self, settings: AppSettings, plan: EditableMergePlan) -> WorkflowState:
+        output_dir = _resolve_output_dir(settings)
+        plan_path = output_dir / md_mrg_planner.MERGE_PLAN_FILE_NAME
+        if not plan_path.exists():
+            raise WorkflowServiceError("Merge plan was not found.", status_code=404)
+
+        config = _settings_to_runtime_config(settings)
+        payload = _payload_from_editable_plan(plan)
+        _editable_plan_from_payload(payload)
+
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                raise WorkflowServiceError("A workflow stage is already running.", status_code=409)
+            if self._state.ocr_status != "complete":
+                raise WorkflowServiceError("Run OCR successfully before merge.", status_code=400)
+            if self._state.merge_status == "running":
+                raise WorkflowServiceError("Merge is already running.", status_code=409)
+
+            _write_json_atomic(plan_path, payload)
+            merge_items = _merge_items_from_editable_plan(plan)
+            self._state.merge_status = "running"
+            self._state.progress = WorkflowProgress(stage="merge", total_jobs=len(merge_items), completed_jobs=0, percent=0.0)
+            self._state.active_merge_item_id = None
+            self._state.merge_items = merge_items
+            self._state.merge_results_available = False
+            self._state.merge_result_error = None
+            self._state.error = None
+            self._state.messages = [
+                WorkflowStatusMessage(severity="info", code="merge_running", message="Merge apply is running.")
+            ]
+            state = self._copy_state()
+            self._worker = threading.Thread(target=self._run_merge_worker, args=(output_dir, config), daemon=True)
+            self._worker.start()
+        self._broadcast(state)
+        return state
+
+    def get_merge_results(self, settings: AppSettings) -> WorkflowMergeResultsResponse:
+        output_dir = _resolve_output_dir(settings)
+        return _load_merge_results(output_dir)
+
+    def resolve_merge_result_pdf_path(self, settings: AppSettings, result_id: str) -> Path:
+        output_dir = _resolve_output_dir(settings)
+        _, output_pdf, _ = _validated_merge_result_artifact(output_dir, result_id)
+        return _resolve_output_file(output_dir, output_pdf, missing_message="Merge result PDF was not found.")
+
+    def get_merge_result_markdown(self, settings: AppSettings, result_id: str) -> MarkdownPreviewResponse:
+        output_dir = _resolve_output_dir(settings)
+        _, _, output_markdown = _validated_merge_result_artifact(output_dir, result_id)
+        markdown_path = _resolve_output_file(output_dir, output_markdown, missing_message="Merge result Markdown was not found.")
+        try:
+            content = markdown_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise WorkflowServiceError("Merge result Markdown is not valid UTF-8.", status_code=400) from exc
+        except OSError as exc:
+            raise WorkflowServiceError("Merge result Markdown could not be read.", status_code=500) from exc
+        return MarkdownPreviewResponse(id=result_id, markdown_file=output_markdown, content=content)
 
     def resolve_ocr_artifact_preview_path(self, settings: AppSettings, artifact_id: str) -> Path:
         output_dir = _resolve_output_dir(settings)
@@ -187,6 +248,22 @@ class WorkflowService:
             self._mark_failed(exc.error_code, str(exc))
         except Exception as exc:
             self._mark_failed("workflow_runtime_error", f"{type(exc).__name__}: {exc}")
+
+    def _run_merge_worker(self, output_dir: Path, config: AppConfig) -> None:
+        try:
+            md_mrg_apply.run_apply(
+                source_dir=output_dir,
+                cfg=config,
+                progress_callback=self._handle_apply_progress,
+            )
+            _load_merge_results(output_dir)
+            self._mark_merge_complete()
+        except md_mrg_apply.ApplyError as exc:
+            self._mark_merge_failed(exc.error_code, str(exc))
+        except WorkflowServiceError as exc:
+            self._mark_merge_failed("merge_result_invalid", str(exc))
+        except Exception as exc:
+            self._mark_merge_failed("merge_runtime_error", f"{type(exc).__name__}: {exc}")
 
     def _handle_generation_progress(self, event: GenerationProgressEvent) -> None:
         with self._lock:
@@ -290,6 +367,55 @@ class WorkflowService:
             state = self._copy_state()
         self._broadcast(state)
 
+    def _handle_apply_progress(self, event: md_mrg_apply.ApplyProgressEvent) -> None:
+        with self._lock:
+            if event.kind == "stage_start":
+                self._state.progress = WorkflowProgress(
+                    stage="merge",
+                    total_jobs=event.total_items,
+                    completed_jobs=event.completed_items,
+                    percent=_bounded_percent(event.completed_items, event.total_items, start=0.0, span=100.0),
+                )
+            elif event.kind in {"item_start", "item_complete", "item_failed"} and event.item_index is not None:
+                merge_item = _merge_item_by_index(self._state.merge_items, event.item_index)
+                if merge_item is not None:
+                    if event.kind == "item_start":
+                        merge_item.status = "running"
+                        self._state.active_merge_item_id = merge_item.id
+                    elif event.kind == "item_complete":
+                        merge_item.status = "done"
+                        merge_item.output_pdf = event.output_pdf
+                        merge_item.output_markdown = event.output_markdown
+                        self._state.active_merge_item_id = None
+                    elif event.kind == "item_failed":
+                        merge_item.status = "failed"
+                        merge_item.error_code = event.error_code
+                        merge_item.message = event.message
+                        self._state.active_merge_item_id = None
+                self._state.progress = WorkflowProgress(
+                    stage="merge",
+                    total_jobs=event.total_items,
+                    completed_jobs=event.completed_items,
+                    percent=_bounded_percent(event.completed_items, event.total_items, start=0.0, span=100.0),
+                )
+            elif event.kind == "result_persisted":
+                self._state.progress = WorkflowProgress(
+                    stage="merge",
+                    total_jobs=event.total_items,
+                    completed_jobs=event.completed_items,
+                    percent=100.0,
+                )
+            elif event.kind == "failed":
+                error = WorkflowStatusMessage(
+                    severity="error",
+                    code=event.error_code or "merge_failed",
+                    message=event.message or "Merge apply failed.",
+                )
+                self._state.merge_result_error = error
+                self._state.messages = [error]
+            state = self._copy_state()
+        self._broadcast(state)
+
     def _update_counts_from_batch(self, batch_path: Path) -> None:
         payload = _read_json(batch_path)
         documents = payload.get("documents", [])
@@ -320,6 +446,37 @@ class WorkflowService:
             self._state.messages = [error]
             self._state.current_item = None
             self._state.active_comparison = None
+            state = self._copy_state()
+        self._broadcast(state)
+
+    def _mark_merge_failed(self, code: str, message: str) -> None:
+        with self._lock:
+            error = WorkflowStatusMessage(severity="error", code=code, message=message)
+            self._state.merge_status = "failed"
+            self._state.merge_results_available = False
+            self._state.merge_result_error = error
+            self._state.active_merge_item_id = None
+            self._state.error = error
+            self._state.messages = [error]
+            state = self._copy_state()
+        self._broadcast(state)
+
+    def _mark_merge_complete(self) -> None:
+        with self._lock:
+            self._state.merge_status = "complete"
+            self._state.progress = WorkflowProgress(
+                stage="merge",
+                total_jobs=len(self._state.merge_items),
+                completed_jobs=len(self._state.merge_items),
+                percent=100.0,
+            )
+            self._state.active_merge_item_id = None
+            self._state.merge_results_available = True
+            self._state.merge_result_error = None
+            self._state.error = None
+            self._state.messages = [
+                WorkflowStatusMessage(severity="success", code="merge_complete", message="Merge apply completed.")
+            ]
             state = self._copy_state()
         self._broadcast(state)
 
@@ -463,6 +620,37 @@ def _payload_from_editable_plan(plan: EditableMergePlan) -> dict[str, Any]:
     return payload
 
 
+def _merge_items_from_editable_plan(plan: EditableMergePlan) -> list[WorkflowMergeItem]:
+    items: list[WorkflowMergeItem] = []
+    for index, item in enumerate(plan.items, start=1):
+        if isinstance(item, EditableImageGroup):
+            items.append(
+                WorkflowMergeItem(
+                    id=item.id,
+                    label=item.display_name,
+                    item_type="group",
+                    item_index=index,
+                )
+            )
+        else:
+            items.append(
+                WorkflowMergeItem(
+                    id=item.id,
+                    label=item.source_file_name,
+                    item_type="pdf",
+                    item_index=index,
+                )
+            )
+    return items
+
+
+def _merge_item_by_index(items: list[WorkflowMergeItem], item_index: int) -> WorkflowMergeItem | None:
+    for item in items:
+        if item.item_index == item_index:
+            return item
+    return None
+
+
 def _document_payload(document: EditableImagePage | EditablePdfDocument) -> dict[str, Any]:
     return document.model_dump(mode="json", exclude={"id", "kind"}, exclude_none=True)
 
@@ -490,6 +678,89 @@ def _resolve_output_file(output_dir: Path, relative_name: str, *, missing_messag
     if not candidate.exists() or not candidate.is_file():
         raise WorkflowServiceError(missing_message, status_code=404)
     return candidate
+
+
+def _load_merge_results(output_dir: Path) -> WorkflowMergeResultsResponse:
+    result_path = output_dir / md_mrg_apply.MERGE_RESULT_FILE_NAME
+    if not result_path.exists():
+        raise WorkflowServiceError("Merge result was not found.", status_code=404)
+    payload = _read_json(result_path)
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raise WorkflowServiceError("batch_mrg_result.json has an invalid items field.", status_code=400)
+
+    items: list[WorkflowMergeResultItem] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            raise WorkflowServiceError("Merge result item must be an object.", status_code=400)
+        items.append(_merge_result_item_from_payload(raw_item))
+    return WorkflowMergeResultsResponse(items=items)
+
+
+def _merge_result_item_from_payload(payload: dict[str, Any]) -> WorkflowMergeResultItem:
+    item_index = payload.get("item_index")
+    item_type = payload.get("item_type")
+    status = payload.get("status")
+    if not isinstance(item_index, int) or item_index < 1:
+        raise WorkflowServiceError("Merge result item is missing item_index.", status_code=400)
+    if item_type not in {"pdf", "group"}:
+        raise WorkflowServiceError("Merge result item has an invalid item_type.", status_code=400)
+    if status not in {"ok", "failed"}:
+        raise WorkflowServiceError("Merge result item has an invalid status.", status_code=400)
+
+    output_pdf = payload.get("output_pdf") if isinstance(payload.get("output_pdf"), str) else None
+    output_markdown = payload.get("output_markdown") if isinstance(payload.get("output_markdown"), str) else None
+    if status == "ok" and (not output_pdf or not output_markdown):
+        raise WorkflowServiceError("Successful merge result item is missing output artifacts.", status_code=400)
+
+    document = payload.get("document") if isinstance(payload.get("document"), dict) else None
+    raw_documents = payload.get("documents")
+    documents = [item for item in raw_documents if isinstance(item, dict)] if isinstance(raw_documents, list) else None
+    label = _merge_result_label(item_type, output_pdf, document, documents)
+    result_id = _encode_merge_result_id(item_index, output_pdf or "", output_markdown or "")
+    return WorkflowMergeResultItem(
+        id=result_id,
+        item_index=item_index,
+        item_type=item_type,
+        status=status,
+        label=label,
+        output_pdf=output_pdf,
+        output_markdown=output_markdown,
+        summary=payload.get("summary") if isinstance(payload.get("summary"), str) else None,
+        document=document,
+        documents=documents,
+        error_code=payload.get("error_code") if isinstance(payload.get("error_code"), str) else None,
+        message=payload.get("message") if isinstance(payload.get("message"), str) else None,
+    )
+
+
+def _merge_result_label(
+    item_type: str,
+    output_pdf: str | None,
+    document: dict[str, Any] | None,
+    documents: list[dict[str, Any]] | None,
+) -> str:
+    if item_type == "pdf" and document is not None:
+        source_file_name = document.get("source_file_name")
+        if isinstance(source_file_name, str) and source_file_name.strip():
+            return source_file_name
+    if item_type == "group" and documents:
+        return f"Merged group ({len(documents)} page{'s' if len(documents) != 1 else ''})"
+    return output_pdf or "Merge result"
+
+
+def _validated_merge_result_artifact(output_dir: Path, result_id: str) -> tuple[int, str, str]:
+    item_index, output_pdf, output_markdown = _decode_merge_result_id(result_id)
+    results = _load_merge_results(output_dir)
+    for item in results.items:
+        if (
+            item.item_index == item_index
+            and item.output_pdf == output_pdf
+            and item.output_markdown == output_markdown
+            and item.status == "ok"
+        ):
+            return item_index, output_pdf, output_markdown
+    raise WorkflowServiceError("Merge result id does not match an available result.", status_code=404)
 
 
 def _resolve_source_artifact_file(settings: AppSettings, relative_name: str) -> Path:
@@ -528,6 +799,32 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 def _encode_artifact_id(source_file_name: str, markdown_file: str) -> str:
     raw = json.dumps([source_file_name, markdown_file], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _encode_merge_result_id(item_index: int, output_pdf: str, output_markdown: str) -> str:
+    raw = json.dumps([item_index, output_pdf, output_markdown], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_merge_result_id(result_id: str) -> tuple[int, str, str]:
+    try:
+        padding = "=" * (-len(result_id) % 4)
+        decoded = base64.urlsafe_b64decode(f"{result_id}{padding}").decode("utf-8")
+        payload = json.loads(decoded)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WorkflowServiceError("Merge result id is invalid.", status_code=400) from exc
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 3
+        or not isinstance(payload[0], int)
+        or payload[0] < 1
+        or not isinstance(payload[1], str)
+        or not isinstance(payload[2], str)
+        or not payload[1].strip()
+        or not payload[2].strip()
+    ):
+        raise WorkflowServiceError("Merge result id is invalid.", status_code=400)
+    return payload[0], payload[1], payload[2]
 
 
 def _decode_artifact_id(artifact_id: str) -> tuple[str, str]:

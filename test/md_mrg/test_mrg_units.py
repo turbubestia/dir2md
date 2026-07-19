@@ -246,6 +246,63 @@ def test_apply_pdf_item_uses_source_pdf_name_markdown_name_and_summary_without_g
     assert (source_dir / "my_file.md").read_text(encoding="utf-8") == "# Abstract\n\nPDF summary\n\n---\n\nPDF body\n"
 
 
+def test_apply_copies_pdf_from_original_source_and_reports_progress(tmp_path: Path) -> None:
+    original_source = tmp_path / "source"
+    output_dir = tmp_path / "out"
+    (original_source / "nested").mkdir(parents=True)
+    output_dir.mkdir()
+    pdf_doc = {
+        "source_file_name": "nested/original.pdf",
+        "file_type": "pdf",
+        "page_count": 2,
+        "date_of_process": "2026-07-14T08:21:54.244888+00:00",
+        "summary": "Original summary",
+        "markdown_file": "original-ocr.md",
+        "status": "ok",
+    }
+    (original_source / "nested" / "original.pdf").write_bytes(b"%PDF-1.4 original")
+    (output_dir / "original-ocr.md").write_text("Original body", encoding="utf-8")
+    (output_dir / "batch_mrg.json").write_text(json.dumps({"documents": [pdf_doc]}), encoding="utf-8")
+    events: list[apply_mod.ApplyProgressEvent] = []
+
+    payload = apply_mod.run_apply(source_dir=output_dir, cfg=_cfg(original_source), progress_callback=events.append)
+
+    assert [event.kind for event in events] == ["stage_start", "item_start", "item_complete", "result_persisted", "complete"]
+    assert events[2].output_pdf == "original.pdf"
+    assert events[2].output_markdown == "original.md"
+    assert events[-1].completed_items == 1
+    assert (original_source / "nested" / "original.pdf").read_bytes() == b"%PDF-1.4 original"
+    assert (output_dir / "original.pdf").read_bytes() == b"%PDF-1.4 original"
+    assert (output_dir / "original.md").read_text(encoding="utf-8") == "# Abstract\n\nOriginal summary\n\n---\n\nOriginal body\n"
+    assert payload["items"][0]["output_pdf"] == "original.pdf"
+
+
+def test_apply_group_pdf_uses_original_source_images_and_output_markdown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    original_source = tmp_path / "source"
+    output_dir = tmp_path / "out"
+    original_source.mkdir()
+    output_dir.mkdir()
+    doc_a = _image_doc("source-a", summary="Summary A")
+    doc_b = _image_doc("source-b", summary="Summary B")
+    Image.new("RGB", (200, 300), color=(255, 255, 255)).save(original_source / "source-a.jpg")
+    Image.new("RGB", (200, 300), color=(255, 255, 255)).save(original_source / "source-b.jpg")
+    (output_dir / "source-a.md").write_text("Page A", encoding="utf-8")
+    (output_dir / "source-b.md").write_text("Page B", encoding="utf-8")
+    (output_dir / "batch_mrg.json").write_text(json.dumps({"documents": [{"documents": [doc_a, doc_b]}]}), encoding="utf-8")
+
+    monkeypatch.setattr(apply_mod, "summarize_document", lambda config, summaries: "Group summary", raising=False)
+
+    payload = apply_mod.run_apply(source_dir=output_dir, cfg=_cfg(original_source))
+
+    assert payload["items"][0]["status"] == "ok"
+    assert (output_dir / "doc_merged_001.pdf").exists()
+    assert (output_dir / "doc_merged_001.md").read_text(encoding="utf-8") == "# Abstract\n\nGroup summary\n\n---\n\nPage A\n\n---\n\nPage B\n"
+    assert not (output_dir / "source-a.jpg").exists()
+    assert not (output_dir / "source-b.jpg").exists()
+    assert (original_source / "source-a.jpg").exists()
+    assert (original_source / "source-b.jpg").exists()
+
+
 def test_apply_group_summary_skips_blank_summaries_and_preserves_plan_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source_dir = tmp_path / "out"
     source_dir.mkdir()

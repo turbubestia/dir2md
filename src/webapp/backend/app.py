@@ -16,7 +16,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
-from .models import AppSettings, EditableMergePlan, MarkdownPreviewResponse, WorkflowDiscoveryResponse, WorkflowState
+from .models import (
+    AppSettings,
+    EditableMergePlan,
+    MarkdownPreviewResponse,
+    WorkflowDiscoveryResponse,
+    WorkflowMergeRequest,
+    WorkflowMergeResultsResponse,
+    WorkflowState,
+)
 from .settings_store import (
     DEFAULT_SETTINGS_FILE,
     SETTINGS_FILE,
@@ -148,6 +156,44 @@ def create_app(
                 status_code=500,
                 content={"detail": str(exc)},
             )  # type: ignore[return-value]
+
+    @application.post("/api/workflow/merge")
+    def post_workflow_merge(payload: dict) -> WorkflowState:
+        try:
+            request = WorkflowMergeRequest.model_validate(payload)
+            settings = load_settings(settings_path, defaults_path)
+            return workflow_service.start_merge(settings, request.plan)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except ValidationError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": exc.errors(include_context=False)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/workflow/merge-results")
+    def get_workflow_merge_results() -> WorkflowMergeResultsResponse:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            return workflow_service.get_merge_results(settings)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
         except WorkflowServiceError as exc:
             return JSONResponse(
                 status_code=exc.status_code,
@@ -213,6 +259,39 @@ def create_app(
         try:
             settings = load_settings(settings_path, defaults_path)
             return workflow_service.get_markdown_preview(settings, artifact_id)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/workflow/merge-result-preview/{result_id}")
+    def get_merge_result_preview(result_id: str) -> FileResponse:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            path = workflow_service.resolve_merge_result_pdf_path(settings, result_id)
+            return FileResponse(path)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/workflow/merge-result-markdown/{result_id}")
+    def get_merge_result_markdown(result_id: str) -> MarkdownPreviewResponse:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            return workflow_service.get_merge_result_markdown(settings, result_id)
         except SettingsStoreError as exc:
             return JSONResponse(
                 status_code=500,

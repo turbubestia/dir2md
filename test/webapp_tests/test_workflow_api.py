@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from webapp.backend.app import create_app
 from md_gen.progress import GenerationProgressEvent
+from md_mrg import apply as apply_mod
 from md_mrg.planner import PlanningProgressEvent
 
 
@@ -75,6 +76,16 @@ def _wait_for_state(client: TestClient, status: str, timeout: float = 2.0) -> di
     while time.monotonic() < deadline:
         state = client.get("/api/workflow/state").json()
         if state["ocr_status"] == status:
+            return state
+        time.sleep(0.01)
+    return client.get("/api/workflow/state").json()
+
+
+def _wait_for_merge_state(client: TestClient, status: str, timeout: float = 2.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = client.get("/api/workflow/state").json()
+        if state["merge_status"] == status:
             return state
         time.sleep(0.01)
     return client.get("/api/workflow/state").json()
@@ -458,8 +469,135 @@ def test_workflow_state_is_idle_before_start(workflow_paths) -> None:
     data = response.json()
     assert data["discovery"] is None
     assert data["ocr_status"] == "idle"
+    assert data["merge_status"] == "idle"
     assert data["progress"]["percent"] == 0.0
     assert data["completed_item_ids"] == []
+
+
+def test_merge_requires_completed_ocr(workflow_paths, tmp_path: Path) -> None:
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    _write_merge_plan(output, [_pdf_doc("report")])
+    _write_settings(settings_path, source, output)
+    client = _client(settings_path, defaults_path)
+    plan = client.get("/api/workflow/merge-plan").json()
+
+    response = client.post("/api/workflow/merge", json={"plan": plan})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Run OCR successfully before merge."
+
+
+def test_merge_runs_apply_loads_results_and_serves_previews(workflow_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    (source / "report.pdf").write_bytes(b"source pdf")
+    _write_settings(settings_path, source, output)
+    plan_payload = {"documents": [_pdf_doc("report")]}
+
+    def fake_generation(config, progress_callback=None):
+        (output / "batch.json").write_text(json.dumps(plan_payload), encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr("webapp.backend.workflow.md_gen_foundation.run_generation", fake_generation)
+    def fake_plan(source_dir, cfg, *, progress_callback=None):
+        (output / "batch_mrg.json").write_text(json.dumps(plan_payload), encoding="utf-8")
+        return plan_payload
+
+    monkeypatch.setattr("webapp.backend.workflow.md_mrg_planner.run_plan", fake_plan)
+
+    def fake_apply(source_dir, cfg, *, progress_callback=None):
+        assert source_dir == output.resolve()
+        assert cfg.paths.source_dir == source.resolve()
+        if progress_callback:
+            progress_callback(apply_mod.ApplyProgressEvent(kind="stage_start", total_items=1))
+            progress_callback(apply_mod.ApplyProgressEvent(kind="item_start", item_index=1, item_type="pdf", total_items=1))
+        (output / "report.pdf").write_bytes(b"merged pdf")
+        (output / "report.md").write_text("# Merged", encoding="utf-8")
+        result_payload = {
+            "items": [
+                {
+                    "item_index": 1,
+                    "item_type": "pdf",
+                    "status": "ok",
+                    "output_pdf": "report.pdf",
+                    "output_markdown": "report.md",
+                    "summary": "Summary report",
+                    "document": _pdf_doc("report"),
+                }
+            ]
+        }
+        (output / "batch_mrg_result.json").write_text(json.dumps(result_payload), encoding="utf-8")
+        if progress_callback:
+            progress_callback(apply_mod.ApplyProgressEvent(kind="item_complete", item_index=1, item_type="pdf", status="ok", total_items=1, completed_items=1, output_pdf="report.pdf", output_markdown="report.md"))
+            progress_callback(apply_mod.ApplyProgressEvent(kind="result_persisted", total_items=1, completed_items=1))
+            progress_callback(apply_mod.ApplyProgressEvent(kind="complete", total_items=1, completed_items=1))
+        return result_payload
+
+    monkeypatch.setattr("webapp.backend.workflow.md_mrg_apply.run_apply", fake_apply)
+    client = _client(settings_path, defaults_path)
+    client.post("/api/workflow/start")
+    client.post("/api/workflow/ocr")
+    assert _wait_for_state(client, "complete")["ocr_status"] == "complete"
+    plan = client.get("/api/workflow/merge-plan").json()
+
+    response = client.post("/api/workflow/merge", json={"plan": plan})
+
+    assert response.status_code == 200
+    assert response.json()["merge_status"] == "running"
+    state = _wait_for_merge_state(client, "complete")
+    assert state["ocr_status"] == "complete"
+    assert state["merge_results_available"] is True
+    assert state["merge_items"][0]["status"] == "done"
+    results = client.get("/api/workflow/merge-results")
+    assert results.status_code == 200
+    item = results.json()["items"][0]
+    assert item["label"] == "report.pdf"
+    assert item["output_pdf"] == "report.pdf"
+    assert client.get(f"/api/workflow/merge-result-preview/{item['id']}").content == b"merged pdf"
+    assert client.get(f"/api/workflow/merge-result-markdown/{item['id']}").json()["content"] == "# Merged"
+    assert client.get(f"/api/workflow/merge-result-preview/{_artifact_id('../outside.pdf', 'report.md')}").status_code == 400
+
+
+def test_merge_marks_failed_when_result_file_is_missing(workflow_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_path, defaults_path = workflow_paths
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    (source / "report.pdf").write_bytes(b"source pdf")
+    _write_settings(settings_path, source, output)
+    plan_payload = {"documents": [_pdf_doc("report")]}
+    def fake_generation(config, progress_callback=None):
+        (output / "batch.json").write_text(json.dumps(plan_payload), encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr("webapp.backend.workflow.md_gen_foundation.run_generation", fake_generation)
+    def fake_plan(source_dir, cfg, *, progress_callback=None):
+        (output / "batch_mrg.json").write_text(json.dumps(plan_payload), encoding="utf-8")
+        return plan_payload
+
+    monkeypatch.setattr("webapp.backend.workflow.md_mrg_planner.run_plan", fake_plan)
+    monkeypatch.setattr("webapp.backend.workflow.md_mrg_apply.run_apply", lambda source_dir, cfg, *, progress_callback=None: {"items": []})
+    client = _client(settings_path, defaults_path)
+    client.post("/api/workflow/start")
+    client.post("/api/workflow/ocr")
+    assert _wait_for_state(client, "complete")["ocr_status"] == "complete"
+    plan = client.get("/api/workflow/merge-plan").json()
+
+    response = client.post("/api/workflow/merge", json={"plan": plan})
+
+    assert response.status_code == 200
+    state = _wait_for_merge_state(client, "failed")
+    assert state["ocr_status"] == "complete"
+    assert state["merge_results_available"] is False
+    assert state["merge_result_error"]["code"] == "merge_result_invalid"
 
 
 def test_ocr_requires_successful_non_empty_start(workflow_paths) -> None:

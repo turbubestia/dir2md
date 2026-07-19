@@ -23,6 +23,7 @@ FolderStatusKind = Literal[
 ]
 WorkflowMessageSeverity = Literal["info", "success", "warning", "error"]
 WorkflowStageStatus = Literal["idle", "enabled", "running", "complete", "failed"]
+MergeItemStatus = Literal["pending", "running", "done", "failed"]
 
 
 class WorkflowStatusMessage(BaseModel):
@@ -86,20 +87,37 @@ class WorkflowCounts(BaseModel):
 
 
 class WorkflowProgress(BaseModel):
-    stage: Literal["idle", "ocr", "planning"] = "idle"
+    stage: Literal["idle", "ocr", "planning", "merge"] = "idle"
     total_jobs: int = 0
     completed_jobs: int = 0
     percent: float = 0.0
 
 
+class WorkflowMergeItem(BaseModel):
+    id: str
+    label: str
+    item_type: Literal["pdf", "group"]
+    item_index: int
+    status: MergeItemStatus = "pending"
+    output_pdf: str | None = None
+    output_markdown: str | None = None
+    error_code: str | None = None
+    message: str | None = None
+
+
 class WorkflowState(BaseModel):
     discovery: WorkflowDiscoveryResponse | None = None
     ocr_status: WorkflowStageStatus = "idle"
+    merge_status: WorkflowStageStatus = "idle"
     progress: WorkflowProgress = Field(default_factory=WorkflowProgress)
     counts: WorkflowCounts = Field(default_factory=WorkflowCounts)
     current_item: WorkflowActiveItem | None = None
     active_comparison: WorkflowActiveComparison | None = None
     completed_item_ids: list[str] = Field(default_factory=list)
+    active_merge_item_id: str | None = None
+    merge_items: list[WorkflowMergeItem] = Field(default_factory=list)
+    merge_results_available: bool = False
+    merge_result_error: WorkflowStatusMessage | None = None
     messages: list[WorkflowStatusMessage] = Field(default_factory=list)
     error: WorkflowStatusMessage | None = None
 
@@ -152,6 +170,29 @@ class EditableMergePlan(BaseModel):
                     raise ValueError(f"Duplicate editable plan document id: {document.id}")
                 seen.add(document.id)
         return self
+
+
+class WorkflowMergeRequest(BaseModel):
+    plan: EditableMergePlan
+
+
+class WorkflowMergeResultItem(BaseModel):
+    id: str
+    item_index: int
+    item_type: Literal["pdf", "group"]
+    status: Literal["ok", "failed"]
+    label: str
+    output_pdf: str | None = None
+    output_markdown: str | None = None
+    summary: str | None = None
+    document: dict[str, Any] | None = None
+    documents: list[dict[str, Any]] | None = None
+    error_code: str | None = None
+    message: str | None = None
+
+
+class WorkflowMergeResultsResponse(BaseModel):
+    items: list[WorkflowMergeResultItem]
 
 
 class MarkdownPreviewResponse(BaseModel):
