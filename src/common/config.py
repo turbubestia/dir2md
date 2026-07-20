@@ -30,13 +30,17 @@ class PromptSettings:
     summary_prompt_text: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class LlamaModelSettings:
     endpoint_url: str
     model_name: str
     request_timeout_seconds: float
     request_max_retries: int
-
+    temperature: float
+    top_p: float
+    top_k: int
+    min_p: float
+    
 
 @dataclass(frozen=True)
 class ImageSettings:
@@ -48,6 +52,7 @@ class ImageSettings:
 class RuntimeSettings:
     dry_run: bool
     overwrite: bool
+    verbose: bool
 
 
 @dataclass(frozen=True)
@@ -125,8 +130,14 @@ def read_json_settings_file() -> dict:
 
 
 def build_path_settings_from_args(args: SimpleNamespace) -> PathSettings:
-    source_dir = _resolve_required_directory(args.source)
-    output_dir = _resolve_output_directory(args.output)
+    source_dir = Path()
+    if hasattr(args, "source") and args.source is not None:
+        source_dir = _resolve_required_directory(args.source)
+
+    output_dir = Path()
+    if hasattr(args, "output") and args.output is not None:
+        output_dir = _resolve_output_directory(args.output)
+
     return PathSettings(
         source_dir=source_dir,
         output_dir=output_dir,
@@ -185,6 +196,13 @@ def build_llama_model_settings_from_args(args: SimpleNamespace, json_config: dic
         _request_timeout_seconds = 120.0
         print("INFO: Using default model request timeout of 120.0 seconds (missing setting in JSON and command-line argument)")
 
+    _temperature = getattr(args, "temperature", None)
+    if _temperature is None:
+        _temperature = json_config.get("temperature")
+    if _temperature is None:
+        _temperature = 0.7
+        print("INFO: Using default model temperature of 0.7 (missing setting in JSON and command-line argument)")
+
     _request_max_retries = getattr(args, "max_retries", None)
     if _request_max_retries is None:
         _request_max_retries = json_config.get("max_retries")
@@ -192,11 +210,36 @@ def build_llama_model_settings_from_args(args: SimpleNamespace, json_config: dic
         _request_max_retries = 2
         print("INFO: Using default model request max retries of 2 (missing setting in JSON and command-line argument)")
 
+    _top_p = getattr(args, "top_p", None)
+    if _top_p is None:
+        _top_p = json_config.get("top_p")
+    if _top_p is None:
+        _top_p = 0.9
+        print("INFO: Using default model top-p of 0.9 (missing setting in JSON and command-line argument)")
+
+    _top_k = getattr(args, "top_k", None)
+    if _top_k is None:
+        _top_k = json_config.get("top_k")
+    if _top_k is None:
+        _top_k = 0
+        print("INFO: Using default model top-k of 0 (missing setting in JSON and command-line argument)")
+
+    _min_p = getattr(args, "min_p", None)
+    if _min_p is None:
+        _min_p = json_config.get("min_p")
+    if _min_p is None:
+        _min_p = 0.05
+        print("INFO: Using default model min-p of 0.05 (missing setting in JSON and command-line argument)")
+
     return LlamaModelSettings(
         endpoint_url = _endpoint_url,
         model_name = _model_name,
         request_timeout_seconds = _request_timeout_seconds,
         request_max_retries = _request_max_retries,
+        temperature = _temperature,
+        top_p = _top_p,
+        top_k = _top_k,
+        min_p = _min_p,
     )
 
 def build_image_settings_from_args(args: SimpleNamespace, json_config: dict) -> ImageSettings:
@@ -296,6 +339,7 @@ def build_md_mrg_config_from_args(args: SimpleNamespace) -> AppConfig:
         runtime=RuntimeSettings(
             dry_run=False,
             overwrite=getattr(args, "overwrite", False),
+            verbose=getattr(args, "verbose", False),
         ),
     )
 
@@ -315,33 +359,37 @@ def build_config_from_args(args: SimpleNamespace) -> AppConfig:
     _prompts = build_prompt_settings_from_args(args, md_gen_json.get("summary", {}))
 
     _ocr_args = SimpleNamespace(
-        model_endpoint=args.ocr_model_endpoint,
-        model_name=args.ocr_model_name,
-        timeout_seconds=args.ocr_timeout_seconds,
-        max_retries=args.ocr_max_retries,
+        model_endpoint=getattr(args, "ocr_model_endpoint", None),
+        model_name=getattr(args, "ocr_model_name", None),
+        timeout_seconds=getattr(args, "ocr_timeout_seconds", None),
+        max_retries=getattr(args, "ocr_max_retries", None),
     )
     _ocr_model = build_llama_model_settings_from_args(_ocr_args, json_config.get("ocr_model", {}))
 
     _language_args = SimpleNamespace(
-        model_endpoint=args.language_model_endpoint,
-        model_name=args.language_model_name,
-        timeout_seconds=args.language_timeout_seconds,
-        max_retries=args.language_max_retries,
+        model_endpoint=getattr(args, "language_model_endpoint", None),
+        model_name=getattr(args, "language_model_name", None),
+        timeout_seconds=getattr(args, "language_timeout_seconds", None),
+        max_retries=getattr(args, "language_max_retries", None),
     )
     _language_model = build_llama_model_settings_from_args(_language_args, json_config.get("language_model", {}))
 
     _image = build_image_settings_from_args(args, md_gen_json.get("image", {}))
 
+    md_gen_settings = MdGenSettings(prompts=_prompts, image=_image)
     md_mrg_settings = build_md_mrg_settings_from_json(json_config)
+
+    runtime_settings = RuntimeSettings(
+        dry_run=getattr(args, "dry_run", False),
+        overwrite=getattr(args, "overwrite", False),
+        verbose=getattr(args, "verbose", False),
+    )
 
     return AppConfig(
         paths=_paths,
         ocr_model=_ocr_model,
         language_model=_language_model,
-        md_gen=MdGenSettings(prompts=_prompts, image=_image),
+        md_gen=md_gen_settings,
         md_mrg=md_mrg_settings,
-        runtime=RuntimeSettings(
-            dry_run=args.dry_run,
-            overwrite=args.overwrite,
-        ),
+        runtime=runtime_settings,
     )

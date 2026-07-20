@@ -15,7 +15,11 @@
         "endpoint": "http://127.0.0.1:8081/v1/chat/completions",
         "model": "qwen3-1.7b",
         "timeout_seconds": 120,
-        "max_retries": 3
+        "max_retries": 3,
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 0,
+        "min_p": 0.05
     },
     "md_gen": {
         "summary": {

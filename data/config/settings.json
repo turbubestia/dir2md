@@ -5,17 +5,26 @@
     "output_folder": "C:\\Development\\projects\\data\\output",
     "verbose": true,
     "overwrite": true,
+    "dry-run": false,
     "ocr_model": {
         "endpoint": "http://192.168.1.147:8080/v1/chat/completions",
         "model": "lightonocr-2",
         "timeout_seconds": 120.0,
-        "max_retries": 3
+        "max_retries": 3,
+        "temperature": 0,
+        "top_p": 0.9,
+        "top_k": 0,
+        "min_p": 0.05
     },
     "language_model": {
         "endpoint": "http://192.168.1.147:8081/v1/chat/completions",
         "model": "llama-3.2-1B",
         "timeout_seconds": 120.0,
-        "max_retries": 3
+        "max_retries": 3,
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 0,
+        "min_p": 0.05
     },
     "md_gen": {
         "summary": {

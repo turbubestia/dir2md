@@ -36,6 +36,18 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "Launch LL-CLI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "llmcli.cli",
+            "args": [
+                "-s", ".\\data\\examples\\summary-system.md",
+                "-u", ".\\data\\examples\\summary-user.md",
+                "--verbose"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Launch Webapp Backend",
             "type": "debugpy",
             "request": "launch",

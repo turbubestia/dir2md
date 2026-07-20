@@ -46,7 +46,7 @@ def main() -> int:
         return 2
 
     if args.verbose:
-        print(format_config_dump(config, command="md-mrg"))
+        print(format_config_dump(config))
 
     try:
         if args.plan:
