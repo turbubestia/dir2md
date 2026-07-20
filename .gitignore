@@ -110,6 +110,11 @@ pnpm-debug.log*
 dist/
 *.local
 
+# TypeScript / Vite build artifacts
+*.tsbuildinfo
+src/webapp/frontend/*.config.js
+src/webapp/frontend/*.config.d.ts
+
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
