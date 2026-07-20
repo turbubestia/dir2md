@@ -103,32 +103,12 @@ def test_build_config_from_overrides_leaves_unresolved_shared_paths_empty_when_m
     assert app_config.paths.output_dir is None
 
 
-def test_build_md_mrg_settings_from_json_falls_back_to_default_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_build_config_from_overrides_falls_back_to_default_score_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     default_prompt = tmp_path / "default-score.md"
     default_prompt.write_text("default score prompt", encoding="utf-8")
     monkeypatch.setattr(config, "DEFAULT_SCORE_PROMPT_FILE", default_prompt)
 
-    settings = config.build_md_mrg_settings_from_json({})
+    app_config = config.build_config_from_overrides({}, {})
 
-    assert settings.score.summary_prompt_path == default_prompt.resolve()
-    assert settings.score.summary_prompt_text == "default score prompt"
-
-
-def test_build_prompt_settings_from_args_returns_none_when_unset() -> None:
-    prompt_settings = config.build_prompt_settings_from_args(
-        type("Args", (), {"summary_prompt": None})(),
-        {},
-    )
-
-    assert prompt_settings.summary_prompt_path is None
-    assert prompt_settings.summary_prompt_text is None
-
-
-def test_build_image_settings_from_args_uses_provided_values() -> None:
-    image_settings = config.build_image_settings_from_args(
-        type("Args", (), {"max_longest_edge_px": 2048, "token_threshold": 4096})(),
-        {},
-    )
-
-    assert image_settings.max_longest_edge_px == 2048
-    assert image_settings.token_threshold == 4096
+    assert app_config.md_mrg.score.summary_prompt_path == default_prompt.resolve()
+    assert app_config.md_mrg.score.summary_prompt_text == "default score prompt"
