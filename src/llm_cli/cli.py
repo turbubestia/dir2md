@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from types import SimpleNamespace
 from pathlib import Path
 
-from common.config import ConfigValidationError, build_config_from_args
+from common.config import ConfigValidationError, build_config_from_overrides
 from common.config_dump import format_config_dump
 
 from .chat import run_chat
@@ -28,13 +27,36 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
+
+def build_config_overrides(args: argparse.Namespace) -> dict[str, object]:
+    language_model = {
+        key: value
+        for key, value in {
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "top_k": args.top_k,
+            "min_p": args.min_p,
+        }.items()
+        if value is not None
+    }
+
+    overrides: dict[str, object] = {}
+    if language_model:
+        overrides["language_model"] = language_model
+    if args.verbose:
+        overrides["runtime"] = {"verbose": True}
+    return overrides
+
+
+def build_config_from_args(args: argparse.Namespace) -> object:
+    return build_config_from_overrides(build_config_overrides(args))
+
 def main() -> int:
     parser = build_parser()
 
     try:
         args = parser.parse_args()
-        simple_args = SimpleNamespace(**vars(args))
-        config = build_config_from_args(simple_args)
+        config = build_config_from_args(args)
     except ConfigValidationError as exc:
         print(f"ERROR code={exc.error_code} message={exc}")
         return 2
@@ -44,16 +66,6 @@ def main() -> int:
 
     system_prompt = Path(args.system).expanduser().resolve()
     user_prompt = Path(args.user).expanduser().resolve()
-
-    # override the language model settings if specified in the CLI arguments
-    if args.temperature is not None:
-        config.language_model.temperature = args.temperature
-    if args.top_p is not None:
-        config.language_model.top_p = args.top_p
-    if args.top_k is not None:
-        config.language_model.top_k = args.top_k
-    if args.min_p is not None:
-        config.language_model.min_p = args.min_p
 
     if config.runtime.verbose:
         print(format_config_dump(config))

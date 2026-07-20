@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from types import SimpleNamespace
 
-from common.config import ConfigValidationError, build_config_from_args
+from common.config import ConfigValidationError, build_config_from_overrides
 from common.config_dump import format_config_dump
 from .foundation import run_foundation_bootstrap
 
@@ -36,12 +35,68 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_config_overrides(args: argparse.Namespace) -> dict[str, object]:
+    overrides: dict[str, object] = {"paths": {"source_dir": args.source, "output_dir": args.output}}
+
+    ocr_model = {
+        key: value
+        for key, value in {
+            "endpoint": args.ocr_model_endpoint,
+            "model": args.ocr_model_name,
+            "timeout_seconds": args.ocr_timeout_seconds,
+            "max_retries": args.ocr_max_retries,
+        }.items()
+        if value is not None
+    }
+    if ocr_model:
+        overrides["ocr_model"] = ocr_model
+
+    language_model = {
+        key: value
+        for key, value in {
+            "endpoint": args.language_model_endpoint,
+            "model": args.language_model_name,
+            "timeout_seconds": args.language_timeout_seconds,
+            "max_retries": args.language_max_retries,
+        }.items()
+        if value is not None
+    }
+    if language_model:
+        overrides["language_model"] = language_model
+
+    md_gen: dict[str, object] = {}
+    summary = {key: value for key, value in {"prompt_path": args.summary_prompt}.items() if value is not None}
+    if summary:
+        md_gen["summary"] = summary
+    image = {
+        key: value
+        for key, value in {
+            "max_longest_edge_px": args.max_longest_edge_px,
+            "token_threshold": args.token_threshold,
+        }.items()
+        if value is not None
+    }
+    if image:
+        md_gen["image"] = image
+    if md_gen:
+        overrides["md_gen"] = md_gen
+
+    runtime = {key: True for key, enabled in {"dry_run": args.dry_run, "overwrite": args.overwrite, "verbose": args.verbose}.items() if enabled}
+    if runtime:
+        overrides["runtime"] = runtime
+
+    return overrides
+
+
+def build_config_from_args(args: argparse.Namespace) -> object:
+    return build_config_from_overrides(build_config_overrides(args))
+
+
 def main() -> int:
     parser = build_parser()
     try:
         args = parser.parse_args()
-        simple_args = SimpleNamespace(**vars(args))
-        config = build_config_from_args(simple_args)
+        config = build_config_from_args(args)
     except ConfigValidationError as exc:
         print(f"ERROR code={exc.error_code} message={exc}")
         return 2

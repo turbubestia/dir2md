@@ -57,6 +57,20 @@ class ScoreOutcome:
     response_text: str | None = None
 
 
+def _validate_plan_inputs(source_dir: Path | None, cfg: AppConfig) -> None:
+    if source_dir is None:
+        raise PlannerError("batch_file_not_found", "Input source directory is not configured")
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise PlannerError("batch_file_not_found", f"Input source directory does not exist: {source_dir}")
+
+    if cfg.language_model.endpoint_url is None:
+        raise PlannerError("language_model_endpoint_not_specified", "Language model endpoint must be configured before planning starts")
+    if cfg.language_model.model_name is None:
+        raise PlannerError("language_model_name_not_specified", "Language model name must be configured before planning starts")
+    if cfg.md_mrg.score.summary_prompt_text is None:
+        raise PlannerError("md_mrg_score_prompt_missing", "Merge scoring prompt must be configured before planning starts")
+
+
 def _read_json_file(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -290,15 +304,18 @@ def _build_groups(
 
 
 def run_plan(
-    source_dir: Path,
+    source_dir: Path | None,
     cfg: AppConfig,
     *,
     progress_callback: PlanningProgressCallback | None = None,
 ) -> dict[str, Any]:
-    batch_path = source_dir / BATCH_FILE_NAME
-    plan_path = source_dir / MERGE_PLAN_FILE_NAME
-
     try:
+        _validate_plan_inputs(source_dir, cfg)
+
+        assert source_dir is not None
+        batch_path = source_dir / BATCH_FILE_NAME
+        plan_path = source_dir / MERGE_PLAN_FILE_NAME
+
         if not batch_path.exists():
             raise PlannerError("batch_file_not_found", f"Input batch file does not exist: {batch_path}")
 

@@ -8,9 +8,16 @@ from common.gateway import GatewayError, LlamaLanguageGateway, TextRequest, Text
 from common.config import AppConfig
 
 
+def _validate_chat_inputs(config: AppConfig) -> None:
+    if config.language_model.endpoint_url is None:
+        raise ValueError("Language model endpoint must be configured before chat starts")
+    if config.language_model.model_name is None:
+        raise ValueError("Language model name must be configured before chat starts")
+
+
 def _dump_raw_response_json(config: AppConfig, raw_response: dict[str, Any]) -> None:
     output_dir = config.paths.output_dir
-    if output_dir == Path():
+    if output_dir is None or output_dir == Path():
         print("WARNING raw response not persisted: output directory is not configured")
         return
 
@@ -28,6 +35,12 @@ def _dump_raw_response_json(config: AppConfig, raw_response: dict[str, Any]) -> 
     print(f"Raw response saved to: {output_path}")
 
 def run_chat(config: AppConfig, system: Path, user: Path) -> int:
+    try:
+        _validate_chat_inputs(config)
+    except ValueError as exc:
+        print(f"ERROR sending chat request: {exc}")
+        return 1
+
     # read system prompt file
     try:
         with system.open("r", encoding="utf-8") as f:

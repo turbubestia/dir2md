@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from common.config import (
@@ -53,7 +55,7 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
 
     rendered = format_config_dump(config)
 
-    assert "=== md-gen startup config dump ===" in rendered
+    assert "=== startup config dump ===" in rendered
     assert "[paths]" in rendered
     assert "source_dir=C:\\docs\\source" in rendered
     assert "output_dir=C:\\docs\\output" in rendered
@@ -74,6 +76,10 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
     assert "request_timeout_seconds=90.0" in rendered
     assert "request_max_retries=4" in rendered
 
+    assert "[md_mrg.score]" in rendered
+    assert "summary_prompt_path=C:\\docs\\prompts\\score.md" in rendered
+    assert "score prompt" in rendered
+
     assert "[md_gen.image]" in rendered
     assert "max_longest_edge_px=1540" in rendered
     assert "token_threshold=16000" in rendered
@@ -81,6 +87,7 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
     assert "[runtime]" in rendered
     assert "dry_run=True" in rendered
     assert "overwrite=False" in rendered
+    assert "verbose=False" in rendered
     assert "=== end startup config dump ===" in rendered
 
 

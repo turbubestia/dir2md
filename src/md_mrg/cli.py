@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from types import SimpleNamespace
 
-from common.config import ConfigValidationError, build_md_mrg_config_from_args
+from common.config import ConfigValidationError, build_config_from_overrides
 from common.config_dump import format_config_dump
 
 from .apply import ApplyError, run_apply
@@ -32,12 +31,39 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_config_overrides(args: argparse.Namespace) -> dict[str, object]:
+    overrides: dict[str, object] = {"paths": {"source_dir": args.source}}
+
+    language_model = {
+        key: value
+        for key, value in {
+            "endpoint": args.language_model_endpoint,
+            "model": args.language_model_name,
+            "timeout_seconds": args.language_timeout_seconds,
+            "max_retries": args.language_max_retries,
+        }.items()
+        if value is not None
+    }
+    if language_model:
+        overrides["language_model"] = language_model
+
+    runtime = {key: True for key, enabled in {"overwrite": args.overwrite, "verbose": args.verbose}.items() if enabled}
+    if runtime:
+        overrides["runtime"] = runtime
+
+    return overrides
+
+
+def build_md_mrg_config_from_args(args: argparse.Namespace) -> object:
+    return build_config_from_overrides(build_config_overrides(args))
+
+
 def main() -> int:
     parser = build_parser()
 
     try:
         args = parser.parse_args()
-        config = build_md_mrg_config_from_args(SimpleNamespace(**vars(args)))
+        config = build_md_mrg_config_from_args(args)
     except ConfigValidationError as exc:
         print(f"ERROR code={exc.error_code} message={exc}")
         return 2
@@ -46,7 +72,7 @@ def main() -> int:
         return 2
 
     if args.verbose:
-        print(format_config_dump(config))
+        print(format_config_dump(config, "md-mrg"))
 
     try:
         if args.plan:

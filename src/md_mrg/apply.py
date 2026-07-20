@@ -59,6 +59,21 @@ class ApplyError(RuntimeError):
         self.error_code = error_code
 
 
+def _validate_apply_inputs(source_dir: Path | None, cfg: AppConfig) -> None:
+    if source_dir is None:
+        raise ApplyError("plan_file_not_found", "Merge source directory is not configured")
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise ApplyError("plan_file_not_found", f"Merge source directory does not exist: {source_dir}")
+    if cfg.paths.source_dir is None:
+        raise ApplyError("source_directory_not_specified", "Source directory must be configured before apply starts")
+    if cfg.language_model.endpoint_url is None:
+        raise ApplyError("language_model_endpoint_not_specified", "Language model endpoint must be configured before apply starts")
+    if cfg.language_model.model_name is None:
+        raise ApplyError("language_model_name_not_specified", "Language model name must be configured before apply starts")
+    if cfg.md_gen.prompts.summary_prompt_text is None:
+        raise ApplyError("summary_prompt_not_specified", "Summary prompt must be configured before apply starts")
+
+
 def _read_json_file(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -285,16 +300,20 @@ def _validate_planned_outputs(work_items: list[dict[str, Any]]) -> None:
 
 
 def run_apply(
-    source_dir: Path,
+    source_dir: Path | None,
     cfg: AppConfig,
     progress_callback: Callable[[ApplyProgressEvent], None] | None = None,
 ) -> dict[str, Any]:
-    plan_path = source_dir / MERGE_PLAN_FILE_NAME
-    result_path = source_dir / MERGE_RESULT_FILE_NAME
     completed_items = 0
     total_items = 0
 
     try:
+        _validate_apply_inputs(source_dir, cfg)
+
+        assert source_dir is not None
+        plan_path = source_dir / MERGE_PLAN_FILE_NAME
+        result_path = source_dir / MERGE_RESULT_FILE_NAME
+
         if not plan_path.exists():
             raise ApplyError("plan_file_not_found", f"Merge plan file does not exist: {plan_path}")
 

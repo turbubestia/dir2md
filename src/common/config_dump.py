@@ -20,22 +20,40 @@ def _append_model(lines: list[str], section: str, model: LlamaModelSettings) -> 
     )
 
 
-def format_config_dump(config: AppConfig) -> str:
+def _append_prompt(lines: list[str], section: str, prompt_path, prompt_text) -> None:
+    lines.extend(
+        [
+            f"[{section}]",
+            f"summary_prompt_path={prompt_path}",
+            "summary_prompt_text:",
+            "" if prompt_text is None else prompt_text,
+            "",
+        ]
+    )
 
+
+def format_config_dump(config: AppConfig, command: str | None = None) -> str:
     lines = [
         "=== startup config dump ===",
         "[paths]",
         f"source_dir={config.paths.source_dir}",
         f"output_dir={config.paths.output_dir}",
         "",
-        "[md_gen.prompts]",
-        f"summary_prompt_path={config.md_gen.prompts.summary_prompt_path}",
-        "summary_prompt_text:",
-        config.md_gen.prompts.summary_prompt_text,
-        "",
     ]
+    _append_prompt(
+        lines,
+        "md_gen.prompts",
+        config.md_gen.prompts.summary_prompt_path,
+        config.md_gen.prompts.summary_prompt_text,
+    )
     _append_model(lines, "ocr_model", config.ocr_model)
     _append_model(lines, "language_model", config.language_model)
+    _append_prompt(
+        lines,
+        "md_mrg.score",
+        config.md_mrg.score.summary_prompt_path,
+        config.md_mrg.score.summary_prompt_text,
+    )
     lines.extend(
         [
             "[md_gen.image]",

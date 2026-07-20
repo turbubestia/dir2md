@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import llmcli.chat as chat
+import llm_cli.chat as chat
 from common.config import (
     AppConfig,
     ImageSettings,

@@ -30,6 +30,7 @@ from .settings_store import (
     SETTINGS_FILE,
     SettingsStoreError,
     load_settings,
+    resolve_shared_config,
     save_settings,
 )
 from .workflow import WorkflowService, WorkflowServiceError
@@ -97,6 +98,7 @@ def create_app(
     def post_workflow_start() -> WorkflowDiscoveryResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.discover_start(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -108,6 +110,7 @@ def create_app(
     def post_workflow_ocr() -> WorkflowState:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.start_ocr(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -128,6 +131,7 @@ def create_app(
     def get_workflow_merge_plan() -> EditableMergePlan:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.get_editable_merge_plan(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -145,6 +149,7 @@ def create_app(
         try:
             plan = EditableMergePlan.model_validate(payload)
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.save_editable_merge_plan(settings, plan)
         except ValidationError as exc:
             return JSONResponse(
@@ -162,6 +167,7 @@ def create_app(
         try:
             request = WorkflowMergeRequest.model_validate(payload)
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.start_merge(settings, request.plan)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -183,6 +189,7 @@ def create_app(
     def get_workflow_merge_results() -> WorkflowMergeResultsResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.get_merge_results(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -224,6 +231,7 @@ def create_app(
     def get_source_preview(file_id: str) -> FileResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             path = workflow_service.resolve_preview_path(settings, file_id)
             return FileResponse(path)
         except SettingsStoreError as exc:
@@ -241,6 +249,7 @@ def create_app(
     def get_ocr_preview(artifact_id: str) -> FileResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             path = workflow_service.resolve_ocr_artifact_preview_path(settings, artifact_id)
             return FileResponse(path)
         except SettingsStoreError as exc:
@@ -258,6 +267,7 @@ def create_app(
     def get_markdown_preview(artifact_id: str) -> MarkdownPreviewResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.get_markdown_preview(settings, artifact_id)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -274,6 +284,7 @@ def create_app(
     def get_merge_result_preview(result_id: str) -> FileResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             path = workflow_service.resolve_merge_result_pdf_path(settings, result_id)
             return FileResponse(path)
         except SettingsStoreError as exc:
@@ -291,6 +302,7 @@ def create_app(
     def get_merge_result_markdown(result_id: str) -> MarkdownPreviewResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.get_merge_result_markdown(settings, result_id)
         except SettingsStoreError as exc:
             return JSONResponse(

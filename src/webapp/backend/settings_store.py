@@ -13,8 +13,9 @@ import os
 import shutil
 from pathlib import Path
 from tempfile import mkstemp
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from common.config import AppConfig, build_config_from_overrides
 from .models import AppSettings
 
 if TYPE_CHECKING:
@@ -119,6 +120,45 @@ def save_settings(
         ) from exc
 
     return payload
+
+
+def app_settings_to_shared_overrides(payload: AppSettings) -> dict[str, Any]:
+    return {
+        "paths": {
+            "source_dir": payload.source_folder or None,
+            "output_dir": payload.output_folder or None,
+        },
+        "ocr_model": {
+            "endpoint": str(payload.ocr_model.endpoint),
+            "model": payload.ocr_model.model,
+            "timeout_seconds": payload.ocr_model.timeout_seconds,
+            "max_retries": payload.ocr_model.max_retries,
+        },
+        "language_model": {
+            "endpoint": str(payload.language_model.endpoint),
+            "model": payload.language_model.model,
+            "timeout_seconds": payload.language_model.timeout_seconds,
+            "max_retries": payload.language_model.max_retries,
+        },
+        "md_gen": {
+            "summary": {"prompt_path": payload.md_gen.summary.prompt_path},
+            "image": {
+                "max_longest_edge_px": payload.md_gen.image.max_longest_edge_px,
+                "token_threshold": payload.md_gen.image.token_threshold,
+            },
+        },
+        "md_mrg": {
+            "score": {"prompt_path": payload.md_mrg.score.prompt_path},
+        },
+        "runtime": {
+            "verbose": payload.verbose or None,
+            "overwrite": payload.overwrite or None,
+        },
+    }
+
+
+def resolve_shared_config(payload: AppSettings) -> AppConfig:
+    return build_config_from_overrides(app_settings_to_shared_overrides(payload), {})
 
 
 def _bootstrap_settings_file(
