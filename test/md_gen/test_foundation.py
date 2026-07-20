@@ -70,7 +70,7 @@ def test_run_foundation_continues_after_file_failure(tmp_path: Path, monkeypatch
     _make_image(source_dir / "a.png")
     _make_image(source_dir / "b.png")
 
-    def fake_process_file(config, file_item):
+    def fake_process_file(config, file_item, **_kwargs):
         if file_item.source_path.name == "a.png":
             return {
                 "source_file_name": "a.png",

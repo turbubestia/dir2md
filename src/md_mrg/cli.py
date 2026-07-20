@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--language-model-name", default=None)
     parser.add_argument("--language-timeout-seconds", type=float, default=None)
     parser.add_argument("--language-max-retries", type=int, default=None)
+    parser.add_argument("--overwrite", action="store_true", default=False)
     parser.add_argument("--verbose", action="store_true", default=False)
 
     return parser

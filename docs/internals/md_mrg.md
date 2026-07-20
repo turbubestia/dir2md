@@ -32,18 +32,22 @@ Output: `source/batch_mrg.json`
 
 ## 3. Apply Flow
 
-Input: `source/batch_mrg.json`
+Input: `apply_dir/batch_mrg.json`
+
+`run_apply(source_dir, cfg, ...)` treats `source_dir` as the apply/output directory that contains OCR markdown, image files, `batch_mrg.json`, and the eventual `batch_mrg_result.json`. It treats `cfg.paths.source_dir` as the original source folder for source PDFs. For PDF records, apply resolves the source PDF from the apply directory first for CLI/backward compatibility, then from `cfg.paths.source_dir`, and copies it into the apply directory using the planned output PDF name. The original PDF is never moved or deleted.
 
 - Iterate `documents` in listed order.
 - Group items (`{"documents": [...]}`):
-  - merge markdown in listed order into `merger-NNN.md`
-  - merge images in listed order into `merged-NNN.pdf`
+  - merge markdown in listed order into `doc_merged_NNN.md`
+  - merge source images from `cfg.paths.source_dir` in listed order into `doc_merged_NNN.pdf`
   - delete only loose markdown files from this group after both merged files succeed
-- Standalone pdf records are treated as passthrough status items.
+- Standalone pdf records copy the source PDF into the apply directory when needed and write a final abstract-prefixed markdown file next to it.
+- `cfg.runtime.overwrite` controls collisions for copied PDFs, markdown outputs, and `batch_mrg_result.json`.
 - Continue processing later items if one group fails.
-- Never delete original image files.
+- Never delete original image files or original source PDFs.
+- Optional apply progress callbacks emit only top-level events: `stage_start`, one `item_start` plus `item_complete` or `item_failed` per plan item, `result_persisted`, and `complete`. Fatal apply errors emit `failed` before raising.
 
-Output: `source/batch_mrg_result.json`
+Output: `apply_dir/batch_mrg_result.json`
 
 ## 4. batch_mrg.json Schema
 
@@ -95,8 +99,9 @@ Top-level shape:
       "item_index": 1,
       "item_type": "group",
       "status": "ok",
-      "output_pdf": "merged-001.pdf",
-      "output_markdown": "merger-001.md",
+      "output_pdf": "doc_merged_001.pdf",
+      "output_markdown": "doc_merged_001.md",
+      "summary": "...",
       "documents": []
     },
     {
@@ -111,6 +116,9 @@ Top-level shape:
       "item_index": 3,
       "item_type": "pdf",
       "status": "ok",
+      "output_pdf": "contract.pdf",
+      "output_markdown": "contract.md",
+      "summary": "...",
       "document": {}
     }
   ]
@@ -121,6 +129,8 @@ Status semantics:
 
 - `ok`: work item completed successfully.
 - `failed`: work item failed but apply continued for later items.
+
+Successful PDF and group items always include `item_index`, `item_type`, `status`, `output_pdf`, `output_markdown`, `summary`, and either `document` or `documents`. Failed group items include `item_index`, `item_type: "group"`, `status: "failed"`, `error_code`, `message`, and `documents`; they do not abort later groups. Fatal errors such as a missing plan, invalid JSON, invalid top-level plan shape, output collision, or result write failure abort apply and raise `ApplyError`.
 
 ## 6. Prompt Envelope Contract
 

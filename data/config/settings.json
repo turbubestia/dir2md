@@ -1,8 +1,8 @@
 {
     "app_name": "dir2md",
     "version": "0.1.0",
-    "source_folder": "",
-    "output_folder": "",
+    "source_folder": "C:\\Development\\projects\\data\\source",
+    "output_folder": "C:\\Development\\projects\\data\\output",
     "verbose": true,
     "overwrite": true,
     "ocr_model": {
@@ -13,7 +13,7 @@
     },
     "language_model": {
         "endpoint": "http://192.168.1.147:8081/v1/chat/completions",
-        "model": "qwen3-1.7b",
+        "model": "llama-3.2-1B",
         "timeout_seconds": 120.0,
         "max_retries": 3
     },

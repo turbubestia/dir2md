@@ -6,11 +6,10 @@ CRITICAL FORMATTING CONSTRAINTS:
 * DO NOT use thinking tags (<think>...</think>).
 * DO NOT output chain-of-thought reasoning, explanations, or introductory text.
 * Return only raw, plain text summary content. Avoid all markdown formatting (no asterisks, bolding, or headers).
+* LENGTH CONSTRAINT: The summary length MUST BE between 10 to 15 sentences long.
 
-CONTENT & CLEANING INSTRUCTIONS:
+CONTENT INSTRUCTIONS:
 * Extract and include key dates (e.g., invoice date, medical service date).
 * Extract and include key subjects and names (e.g., invoice recipient, patient name).
 * Extract and include relevant locations or places.
 * Do not copy tables verbatim; instead, infer and summarize the intent and key information within them.
-* Clean Spanish characters: Convert accented characters (e.g., á, é, í, ó, ú, ñ) to Extended ASCII / ISO-8859-1. If not possible, convert them to their unaccented equivalents (e.g., a, e, i, o, u, n).
-* Strip out characters like *, #, &, <, >. Keep the '$' symbol only when representing monetary amounts.

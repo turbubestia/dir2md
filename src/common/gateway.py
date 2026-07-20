@@ -257,11 +257,15 @@ class LlamaLanguageGateway(_BaseGateway):
     def __init__( self, endpoint_url: str, model_name: str, client: httpx.Client | None = None, ):
         super().__init__( endpoint_url, model_name, client )
         self._gateway_label = "language"
+        self.temperature = 0.7
+        self.max_tokens = 2048
 
     def build_text_request_messages(self, request: TextRequest) -> list[dict[str, Any]]:
         return [
             {"role": "system", "content": request.system_prompt},
-            {"role": "user", "content": request.user_prompt},
+            {"role": "user", "content": 
+             f"Process the following text according to your system instructions:\n\n--- Start of user text ---\n\n{request.user_prompt}"
+            },
         ]
 
     def send_text_request(self, request: TextRequest) -> TextResponse:

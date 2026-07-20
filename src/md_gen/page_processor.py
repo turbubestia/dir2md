@@ -7,13 +7,28 @@ from typing import Any
 from common.config import AppConfig
 from .discovery import FileItem
 from . import ocr_processor, rasterizer, summarize
+from .progress import GenerationProgressCallback, GenerationProgressContext, GenerationProgressEvent
 
 
 def _build_output_markdown_path(config: AppConfig, file_item: FileItem) -> Path:
     return config.paths.output_dir / f"{file_item.source_path.stem}.md"
 
 
-def process_file(config: AppConfig, file_item: FileItem) -> dict[str, Any]:
+def _emit_progress(
+    progress_callback: GenerationProgressCallback | None,
+    event: GenerationProgressEvent,
+) -> None:
+    if progress_callback is not None:
+        progress_callback(event)
+
+
+def process_file(
+    config: AppConfig,
+    file_item: FileItem,
+    *,
+    progress_callback: GenerationProgressCallback | None = None,
+    progress_context: GenerationProgressContext | None = None,
+) -> dict[str, Any]:
     output_path = _build_output_markdown_path(config, file_item)
     markdown_buffer: list[str] = []
     page_summaries: list[str] = []
@@ -28,6 +43,23 @@ def process_file(config: AppConfig, file_item: FileItem) -> dict[str, Any]:
             pages = (1,)
 
         for page_number in pages:
+            total_jobs = progress_context.total_jobs if progress_context is not None else page_count
+            completed_jobs = progress_context.completed_jobs if progress_context is not None else 0
+            markdown_count = progress_context.markdown_count if progress_context is not None else 0
+            _emit_progress(
+                progress_callback,
+                GenerationProgressEvent(
+                    kind="ocr_item_start",
+                    total_jobs=total_jobs,
+                    completed_jobs=completed_jobs,
+                    markdown_count=markdown_count,
+                    source_path=file_item.source_path,
+                    source_file_name=file_item.source_path.name,
+                    source_type=file_item.source_type,
+                    page_number=page_number,
+                    markdown_path=output_path,
+                ),
+            )
             image = rasterizer.rasterize_page(
                 file_item.source_path,
                 max_edge_size=config.md_gen.image.max_longest_edge_px,
@@ -38,6 +70,28 @@ def process_file(config: AppConfig, file_item: FileItem) -> dict[str, Any]:
                 page_summary = summarize.summarize_page(config, page_markdown)
                 markdown_buffer.append(page_markdown)
                 page_summaries.append(page_summary)
+                if progress_context is not None:
+                    progress_context.completed_jobs += 1
+                    progress_context.markdown_count += 1
+                    completed_jobs = progress_context.completed_jobs
+                    markdown_count = progress_context.markdown_count
+                else:
+                    completed_jobs += 1
+                    markdown_count += 1
+                _emit_progress(
+                    progress_callback,
+                    GenerationProgressEvent(
+                        kind="ocr_item_complete",
+                        total_jobs=total_jobs,
+                        completed_jobs=completed_jobs,
+                        markdown_count=markdown_count,
+                        source_path=file_item.source_path,
+                        source_file_name=file_item.source_path.name,
+                        source_type=file_item.source_type,
+                        page_number=page_number,
+                        markdown_path=output_path,
+                    ),
+                )
                 print(f"page {page_number} done")
             finally:
                 image.close()
