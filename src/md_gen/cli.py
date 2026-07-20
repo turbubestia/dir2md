@@ -87,16 +87,11 @@ def build_config_overrides(args: argparse.Namespace) -> dict[str, object]:
 
     return overrides
 
-
-def build_config_from_args(args: argparse.Namespace) -> object:
-    return build_config_from_overrides(build_config_overrides(args))
-
-
 def main() -> int:
     parser = build_parser()
     try:
         args = parser.parse_args()
-        config = build_config_from_args(args)
+        config = build_config_from_overrides(build_config_overrides(args))
     except ConfigValidationError as exc:
         print(f"ERROR code={exc.error_code} message={exc}")
         return 2
