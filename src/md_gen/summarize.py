@@ -16,6 +16,7 @@ def summarize_page(config: AppConfig, page_markdown: str) -> str:
             TextRequest(
                 system_prompt=config.md_gen.prompts.summary_prompt_text,
                 user_prompt=page_markdown,
+                assistant_prompt="",
             )
         )
     return response.text

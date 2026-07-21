@@ -34,7 +34,7 @@ def _dump_raw_response_json(config: AppConfig, raw_response: dict[str, Any]) -> 
 
     print(f"Raw response saved to: {output_path}")
 
-def run_chat(config: AppConfig, system: Path, user: Path) -> int:
+def run_chat(config: AppConfig, system: Path, user: Path, assistant: Path | None = None) -> int:
     try:
         _validate_chat_inputs(config)
     except ValueError as exc:
@@ -57,14 +57,36 @@ def run_chat(config: AppConfig, system: Path, user: Path) -> int:
         print(f"ERROR reading user prompt file: {exc}")
         return 1
     
+    assistant_prompt = ""
+    if assistant is not None:
+        try:
+            with assistant.open("r", encoding="utf-8") as f:
+                assistant_prompt = f.read()
+        except Exception as exc:
+            print(f"ERROR reading assistant prompt file: {exc}")
+            return 1
+
     print("Running chat...")
 
-    request = TextRequest(system_prompt=system_prompt, user_prompt=user_prompt)
+    request = TextRequest(
+        system_prompt=system_prompt, 
+        user_prompt=user_prompt, 
+        assistant_prompt=assistant_prompt
+    )
+
+    if config.language_model.endpoint_url is None:
+        raise ValueError("Language model endpoint must be configured before chat starts")
+    if config.language_model.model_name is None:
+        raise ValueError("Language model name must be configured before chat starts")
+
     gateway = LlamaLanguageGateway(
         endpoint_url=config.language_model.endpoint_url,
         model_name=config.language_model.model_name,
     )
     gateway.temperature = config.language_model.temperature
+    gateway.top_p = config.language_model.top_p
+    gateway.top_k = config.language_model.top_k
+    gateway.min_p = config.language_model.min_p
     
     try:
         response: TextResponse = gateway.send_text_request(request)

@@ -159,6 +159,7 @@ def _score_pair(
         request = TextRequest(
             system_prompt=score_prompt,
             user_prompt=_build_score_user_prompt(page_a_text=page_a_text, page_b_text=page_b_text),
+            assistant_prompt="",
         )
         response = gateway.send_text_request(request)
         response_text = response.text

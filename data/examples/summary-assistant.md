@@ -1,2 +1,2 @@
 <think>
-I will start by recognizing the date, then the subject and write 10 bullet point lines to draft the summary.
+Let me start by reading all the user provided text and write a list of 10 sentenses that I wil use to draft the summary.
