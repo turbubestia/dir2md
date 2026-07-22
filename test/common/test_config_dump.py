@@ -24,8 +24,10 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
         ),
         md_gen=MdGenSettings(
             prompts=PromptSettings(
-                summary_prompt_path=Path("C:/docs/prompts/summary.md"),
-                summary_prompt_text="first line\nsecond line\nthird line",
+                system_path="C:/docs/prompts/summary.md",
+                system_text="first line\nsecond line\nthird line",
+                assistant_path="",
+                assistant_text="",
             ),
             image=ImageSettings(max_longest_edge_px=1540, token_threshold=16000),
         ),
@@ -43,8 +45,16 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
         ),
         md_mrg=MdMrgSettings(
             score=PromptSettings(
-                summary_prompt_path=Path("C:/docs/prompts/score.md"),
-                summary_prompt_text="score prompt",
+                system_path="C:/docs/prompts/score.md",
+                system_text="score prompt",
+                assistant_path="",
+                assistant_text="",
+            ),
+            summary=PromptSettings(
+                system_path="C:/docs/prompts/merge_summary.md",
+                system_text="merge summary prompt",
+                assistant_path="",
+                assistant_text="",
             ),
         ),
         runtime=RuntimeSettings(
@@ -61,8 +71,10 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
     assert "output_dir=C:\\docs\\output" in rendered
 
     assert "[md_gen.prompts]" in rendered
-    assert "summary_prompt_path=C:\\docs\\prompts\\summary.md" in rendered
-    assert "summary_prompt_text:" in rendered
+    assert "system_path=C:/docs/prompts/summary.md" in rendered
+    assert "system_text:" in rendered
+    assert "assistant_path=" in rendered
+    assert "assistant_text:" in rendered
 
     assert "[ocr_model]" in rendered
     assert "endpoint_url=http://localhost:11434" in rendered
@@ -77,8 +89,12 @@ def test_format_config_dump_contains_all_sections_and_fields() -> None:
     assert "request_max_retries=4" in rendered
 
     assert "[md_mrg.score]" in rendered
-    assert "summary_prompt_path=C:\\docs\\prompts\\score.md" in rendered
+    assert "system_path=C:/docs/prompts/score.md" in rendered
     assert "score prompt" in rendered
+
+    assert "[md_mrg.summary]" in rendered
+    assert "system_path=C:/docs/prompts/merge_summary.md" in rendered
+    assert "merge summary prompt" in rendered
 
     assert "[md_gen.image]" in rendered
     assert "max_longest_edge_px=1540" in rendered
@@ -100,8 +116,10 @@ def test_format_config_dump_preserves_multiline_prompt_text_verbatim() -> None:
         ),
         md_gen=MdGenSettings(
             prompts=PromptSettings(
-                summary_prompt_path=None,
-                summary_prompt_text=prompt_text,
+                system_path="",
+                system_text=prompt_text,
+                assistant_path="",
+                assistant_text="",
             ),
             image=ImageSettings(max_longest_edge_px=1200, token_threshold=14000),
         ),
@@ -119,8 +137,16 @@ def test_format_config_dump_preserves_multiline_prompt_text_verbatim() -> None:
         ),
         md_mrg=MdMrgSettings(
             score=PromptSettings(
-                summary_prompt_path=Path("C:/score.md"),
-                summary_prompt_text="score prompt",
+                system_path="C:/score.md",
+                system_text="score prompt",
+                assistant_path="",
+                assistant_text="",
+            ),
+            summary=PromptSettings(
+                system_path="C:/merge_summary.md",
+                system_text="merge summary prompt",
+                assistant_path="",
+                assistant_text="",
             ),
         ),
         runtime=RuntimeSettings(
@@ -131,4 +157,4 @@ def test_format_config_dump_preserves_multiline_prompt_text_verbatim() -> None:
 
     rendered = format_config_dump(config)
 
-    assert f"summary_prompt_text:\n{prompt_text}\n\n[ocr_model]" in rendered
+    assert f"system_text:\n{prompt_text}\nassistant_path=" in rendered

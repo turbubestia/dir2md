@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import LlmTestPanel from './LlmTestPanel'
 import SettingsForm from './SettingsForm'
 import WorkflowPanel from './WorkflowPanel'
 
@@ -73,7 +74,14 @@ export default function WorkspaceShell() {
           {activeSection === 'workflow' ? (
             <WorkflowPanel />
           ) : (
-            <SettingsForm />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-full">
+              <div className="min-h-0 overflow-hidden">
+                <SettingsForm />
+              </div>
+              <div className="min-h-0 overflow-hidden">
+                <LlmTestPanel />
+              </div>
+            </div>
           )}
         </div>
       </main>

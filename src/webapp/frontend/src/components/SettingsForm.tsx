@@ -1,9 +1,57 @@
 import { useEffect, useState } from 'react'
 import { fetchSettings, saveSettings } from '../api'
-import type { AppSettings, ValidationError } from '../types'
+import type {
+  AppSettings,
+  MdGenSummarySettings,
+  MdMrgScoreSettings,
+  MdMrgSummarySettings,
+  ValidationError,
+} from '../types'
 
 interface FieldErrors {
   [key: string]: string
+}
+
+const DEFAULT_MD_GEN_SUMMARY: MdGenSummarySettings = {
+  system_prompt: '',
+  assistant_prompt: '',
+  temperature: 0.7,
+}
+
+const DEFAULT_MD_MRG_SCORE: MdMrgScoreSettings = {
+  system_prompt: '',
+  assistant_prompt: '',
+  temperature: 0.7,
+}
+
+const DEFAULT_MD_MRG_SUMMARY: MdMrgSummarySettings = {
+  system_prompt: '',
+  assistant_prompt: '',
+  temperature: 0.7,
+}
+
+function normalizeSettings(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    md_gen: {
+      ...settings.md_gen,
+      summary: {
+        ...DEFAULT_MD_GEN_SUMMARY,
+        ...settings.md_gen?.summary,
+      },
+    },
+    md_mrg: {
+      ...settings.md_mrg,
+      score: {
+        ...DEFAULT_MD_MRG_SCORE,
+        ...settings.md_mrg?.score,
+      },
+      summary: {
+        ...DEFAULT_MD_MRG_SUMMARY,
+        ...settings.md_mrg?.summary,
+      },
+    },
+  }
 }
 
 function buildFieldErrors(errors: ValidationError[]): FieldErrors {
@@ -44,7 +92,7 @@ export default function SettingsForm() {
   useEffect(() => {
     fetchSettings()
       .then((data) => {
-        setSettings(data)
+        setSettings(normalizeSettings(data))
         setLoading(false)
       })
       .catch((err: Error) => {
@@ -75,7 +123,7 @@ export default function SettingsForm() {
     if (result.ok) {
       setSaveSuccess(true)
       if (result.settings) {
-        setSettings(result.settings)
+        setSettings(normalizeSettings(result.settings))
       }
       window.setTimeout(() => setSaveSuccess(false), 3000)
       return
@@ -389,6 +437,145 @@ export default function SettingsForm() {
                     }))
                   }
                 />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="panel p-3 space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-shell-muted">
+            Prompts
+          </h3>
+          <div className="space-y-3">
+            <div>
+              <h4 className="text-sm font-medium text-shell-text mb-1">md-gen summary</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-shell-muted mb-0.5">
+                    System prompt path
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field py-1.5"
+                    value={settings.md_gen.summary.system_prompt}
+                    onChange={(e) =>
+                      handleChange(() => ({
+                        ...settings,
+                        md_gen: updateNested(settings.md_gen, 'summary', {
+                          ...settings.md_gen.summary,
+                          system_prompt: e.target.value,
+                        }),
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-shell-muted mb-0.5">
+                    Assistant prompt path
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field py-1.5"
+                    value={settings.md_gen.summary.assistant_prompt}
+                    onChange={(e) =>
+                      handleChange(() => ({
+                        ...settings,
+                        md_gen: updateNested(settings.md_gen, 'summary', {
+                          ...settings.md_gen.summary,
+                          assistant_prompt: e.target.value,
+                        }),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-shell-text mb-1">md-mrg score</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-shell-muted mb-0.5">
+                    System prompt path
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field py-1.5"
+                    value={settings.md_mrg.score.system_prompt}
+                    onChange={(e) =>
+                      handleChange(() => ({
+                        ...settings,
+                        md_mrg: updateNested(settings.md_mrg, 'score', {
+                          ...settings.md_mrg.score,
+                          system_prompt: e.target.value,
+                        }),
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-shell-muted mb-0.5">
+                    Assistant prompt path
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field py-1.5"
+                    value={settings.md_mrg.score.assistant_prompt}
+                    onChange={(e) =>
+                      handleChange(() => ({
+                        ...settings,
+                        md_mrg: updateNested(settings.md_mrg, 'score', {
+                          ...settings.md_mrg.score,
+                          assistant_prompt: e.target.value,
+                        }),
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-shell-text mb-1">md-mrg summary</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-shell-muted mb-0.5">
+                    System prompt path
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field py-1.5"
+                    value={settings.md_mrg.summary.system_prompt}
+                    onChange={(e) =>
+                      handleChange(() => ({
+                        ...settings,
+                        md_mrg: updateNested(settings.md_mrg, 'summary', {
+                          ...settings.md_mrg.summary,
+                          system_prompt: e.target.value,
+                        }),
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-shell-muted mb-0.5">
+                    Assistant prompt path
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field py-1.5"
+                    value={settings.md_mrg.summary.assistant_prompt}
+                    onChange={(e) =>
+                      handleChange(() => ({
+                        ...settings,
+                        md_mrg: updateNested(settings.md_mrg, 'summary', {
+                          ...settings.md_mrg.summary,
+                          assistant_prompt: e.target.value,
+                        }),
+                      }))
+                    }
+                  />
+                </div>
               </div>
             </div>
           </div>

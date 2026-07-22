@@ -35,8 +35,11 @@ def test_run_foundation_writes_batch_json_per_source(tmp_path: Path, monkeypatch
             paths=PathSettings(source_dir=source_dir.resolve(), output_dir=output_dir.resolve()),
             ocr_model=LlamaModelSettings(endpoint_url="http://ocr", model_name="ocr"),
             language_model=LlamaModelSettings(endpoint_url="http://lang", model_name="lang"),
-            md_gen=MdGenSettings(prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"), image=ImageSettings()),
-            md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=None, summary_prompt_text="score")),
+            md_gen=MdGenSettings(prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""), image=ImageSettings()),
+            md_mrg=MdMrgSettings(
+                score=PromptSettings(system_path="", system_text="score", assistant_path="", assistant_text=""),
+                summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
+            ),
             runtime=RuntimeSettings(overwrite=False),
         )
         exit_code = run_foundation_bootstrap(config)
@@ -83,8 +86,8 @@ def test_run_foundation_continues_after_file_failure(tmp_path: Path, monkeypatch
         paths=PathSettings(source_dir=source_dir.resolve(), output_dir=output_dir.resolve()),
         ocr_model=LlamaModelSettings(endpoint_url="http://ocr", model_name="ocr"),
         language_model=LlamaModelSettings(endpoint_url="http://lang", model_name="lang"),
-        md_gen=MdGenSettings(prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"), image=ImageSettings()),
-        md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=None, summary_prompt_text="score")),
+        md_gen=MdGenSettings(prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""), image=ImageSettings()),
+        md_mrg=MdMrgSettings(score=PromptSettings(system_path="", system_text="score", assistant_path="", assistant_text=""), summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text="")),
         runtime=RuntimeSettings(overwrite=False),
     )
     exit_code = run_foundation_bootstrap(config)
@@ -106,8 +109,8 @@ def test_run_foundation_returns_config_validation_error_code(tmp_path: Path) -> 
         paths=PathSettings(source_dir=source_dir.resolve(), output_dir=output_dir.resolve()),
         ocr_model=LlamaModelSettings(endpoint_url="http://ocr", model_name="ocr"),
         language_model=LlamaModelSettings(endpoint_url="http://lang", model_name="lang"),
-        md_gen=MdGenSettings(prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"), image=ImageSettings()),
-        md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=None, summary_prompt_text="score")),
+        md_gen=MdGenSettings(prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""), image=ImageSettings()),
+        md_mrg=MdMrgSettings(score=PromptSettings(system_path="", system_text="score", assistant_path="", assistant_text=""), summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text="")),
         runtime=RuntimeSettings(overwrite=False),
     )
 
@@ -129,8 +132,8 @@ def test_run_foundation_returns_gateway_error_code(tmp_path: Path) -> None:
         paths=PathSettings(source_dir=source_dir.resolve(), output_dir=output_dir.resolve()),
         ocr_model=LlamaModelSettings(endpoint_url="http://ocr", model_name="ocr"),
         language_model=LlamaModelSettings(endpoint_url="http://lang", model_name="lang"),
-        md_gen=MdGenSettings(prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"), image=ImageSettings()),
-        md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=None, summary_prompt_text="score")),
+        md_gen=MdGenSettings(prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""), image=ImageSettings()),
+        md_mrg=MdMrgSettings(score=PromptSettings(system_path="", system_text="score", assistant_path="", assistant_text=""), summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text="")),
         runtime=RuntimeSettings(overwrite=False),
     )
 
@@ -152,8 +155,8 @@ def test_run_foundation_returns_runtime_error_code_for_unexpected_exception(tmp_
         paths=PathSettings(source_dir=source_dir.resolve(), output_dir=output_dir.resolve()),
         ocr_model=LlamaModelSettings(endpoint_url="http://ocr", model_name="ocr"),
         language_model=LlamaModelSettings(endpoint_url="http://lang", model_name="lang"),
-        md_gen=MdGenSettings(prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"), image=ImageSettings()),
-        md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=None, summary_prompt_text="score")),
+        md_gen=MdGenSettings(prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""), image=ImageSettings()),
+        md_mrg=MdMrgSettings(score=PromptSettings(system_path="", system_text="score", assistant_path="", assistant_text=""), summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text="")),
         runtime=RuntimeSettings(overwrite=False),
     )
 

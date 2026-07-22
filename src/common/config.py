@@ -16,6 +16,7 @@ class ConfigValidationError(ValueError):
 DEFAULT_SETTINGS_FILE = Path(__file__).resolve().parents[2] / "data" / "config" / "settings.json"
 DEFAULT_SUMMARY_PROMPT_FILE = Path(__file__).resolve().parents[2] / "data" / "prompts" / "md_gen_summary_system_prompt.md"
 DEFAULT_SCORE_PROMPT_FILE = Path(__file__).resolve().parents[2] / "data" / "prompts" / "md_mrg_score_system_prompt.md"
+DEFAULT_MERGE_SUMMARY_PROMPT_FILE = Path(__file__).resolve().parents[2] / "data" / "prompts" / "md_mrg_merge_summary_system_prompt.md"
 
 _MISSING = object()
 
@@ -28,8 +29,10 @@ class PathSettings:
 
 @dataclass(frozen=True)
 class PromptSettings:
-    summary_prompt_path: Path | None = None
-    summary_prompt_text: str | None = None
+    system_path: str = ""
+    system_text: str = ""
+    assistant_path: str = ""
+    assistant_text: str = ""
 
 
 @dataclass(frozen=False)
@@ -66,6 +69,7 @@ class MdGenSettings:
 @dataclass(frozen=True)
 class MdMrgSettings:
     score: PromptSettings
+    summary: PromptSettings
 
 
 @dataclass(frozen=True)
@@ -268,35 +272,72 @@ def _resolve_image_settings(overrides: Mapping[str, Any] | None, settings: Mappi
     )
 
 
-def _resolve_prompt_settings(
+def _resolve_single_prompt(
     *,
     field_name: str,
     override_path: Any,
     settings_path_value: Any,
-    default_path: Path,
-) -> PromptSettings:
+    default_path: Path | None = None,
+) -> tuple[str, str]:
     for candidate, is_default in (
         (override_path, False),
         (settings_path_value, False),
         (default_path, True),
     ):
+        if candidate is None or candidate is _MISSING:
+            continue
+
         resolved_path = _coerce_path(candidate)
         if resolved_path is None:
+            if not is_default:
+                return ("", "")
             continue
 
         try:
             prompt_text = resolved_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            continue
-
-        if not prompt_text.strip():
+            if not is_default:
+                return ("", "")
             continue
 
         if is_default:
             _warn_default(field_name, resolved_path)
-        return PromptSettings(summary_prompt_path=resolved_path, summary_prompt_text=prompt_text)
+        return (str(resolved_path), prompt_text)
 
-    return PromptSettings(summary_prompt_path=None, summary_prompt_text=None)
+    return ("", "")
+
+
+def _resolve_prompt_settings(
+    *,
+    field_name: str,
+    override_system_path: Any,
+    settings_system_path: Any,
+    default_system_path: Path,
+    override_assistant_path: Any,
+    settings_assistant_path: Any,
+) -> PromptSettings:
+    system_path, system_text = _resolve_single_prompt(
+        field_name=field_name,
+        override_path=override_system_path,
+        settings_path_value=settings_system_path,
+        default_path=default_system_path,
+    )
+
+    assistant_path, assistant_text = ("", "")
+    if override_assistant_path is not None or settings_assistant_path is not None:
+        assistant_path, assistant_text = _resolve_single_prompt(
+            field_name=f"{field_name}.assistant",
+            override_path=override_assistant_path,
+            settings_path_value=settings_assistant_path,
+            default_path=None,
+        )
+
+    return PromptSettings(
+        system_path=system_path,
+        system_text=system_text,
+        assistant_path=assistant_path,
+        assistant_text=assistant_text,
+    )
 
 
 def _resolve_model_settings(
@@ -409,19 +450,31 @@ def _resolve_app_config(overrides: Mapping[str, Any] | None, settings_document: 
         ),
         md_gen=MdGenSettings(
             prompts=_resolve_prompt_settings(
-                field_name="md_gen.summary.prompt_path",
-                override_path=_nested_get(normalized_overrides.get("md_gen"), "summary", "prompt_path"),
-                settings_path_value=_nested_get(normalized_settings.get("md_gen"), "summary", "prompt_path"),
-                default_path=DEFAULT_SUMMARY_PROMPT_FILE,
+                field_name="md_gen.summary.system_prompt",
+                override_system_path=_nested_get(normalized_overrides.get("md_gen"), "summary", "system_prompt"),
+                settings_system_path=_nested_get(normalized_settings.get("md_gen"), "summary", "system_prompt"),
+                default_system_path=DEFAULT_SUMMARY_PROMPT_FILE,
+                override_assistant_path=_nested_get(normalized_overrides.get("md_gen"), "summary", "assistant_prompt"),
+                settings_assistant_path=_nested_get(normalized_settings.get("md_gen"), "summary", "assistant_prompt"),
             ),
             image=_resolve_image_settings(normalized_overrides.get("md_gen"), normalized_settings.get("md_gen")),
         ),
         md_mrg=MdMrgSettings(
             score=_resolve_prompt_settings(
-                field_name="md_mrg.score.prompt_path",
-                override_path=_nested_get(normalized_overrides.get("md_mrg"), "score", "prompt_path"),
-                settings_path_value=_nested_get(normalized_settings.get("md_mrg"), "score", "prompt_path"),
-                default_path=DEFAULT_SCORE_PROMPT_FILE,
+                field_name="md_mrg.merge_score.system_prompt",
+                override_system_path=_nested_get(normalized_overrides.get("md_mrg"), "merge_score", "system_prompt"),
+                settings_system_path=_nested_get(normalized_settings.get("md_mrg"), "merge_score", "system_prompt"),
+                default_system_path=DEFAULT_SCORE_PROMPT_FILE,
+                override_assistant_path=_nested_get(normalized_overrides.get("md_mrg"), "merge_score", "assistant_prompt"),
+                settings_assistant_path=_nested_get(normalized_settings.get("md_mrg"), "merge_score", "assistant_prompt"),
+            ),
+            summary=_resolve_prompt_settings(
+                field_name="md_mrg.merge_summary.system_prompt",
+                override_system_path=_nested_get(normalized_overrides.get("md_mrg"), "merge_summary", "system_prompt"),
+                settings_system_path=_nested_get(normalized_settings.get("md_mrg"), "merge_summary", "system_prompt"),
+                default_system_path=DEFAULT_MERGE_SUMMARY_PROMPT_FILE,
+                override_assistant_path=_nested_get(normalized_overrides.get("md_mrg"), "merge_summary", "assistant_prompt"),
+                settings_assistant_path=_nested_get(normalized_settings.get("md_mrg"), "merge_summary", "assistant_prompt"),
             ),
         ),
         runtime=_resolve_runtime_settings(normalized_overrides.get("runtime"), normalized_settings.get("runtime")),

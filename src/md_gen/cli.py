@@ -65,7 +65,7 @@ def build_config_overrides(args: argparse.Namespace) -> dict[str, object]:
         overrides["language_model"] = language_model
 
     md_gen: dict[str, object] = {}
-    summary = {key: value for key, value in {"prompt_path": args.summary_prompt}.items() if value is not None}
+    summary = {key: value for key, value in {"system_prompt": args.summary_prompt}.items() if value is not None}
     if summary:
         md_gen["summary"] = summary
     image = {

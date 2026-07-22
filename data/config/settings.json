@@ -30,10 +30,7 @@
         "summary": {
             "system_prompt": "data/prompts/md_gen_summary_system_prompt.md",
             "assistant_prompt": "",
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "top_k": 0,
-            "min_p": 0.05
+            "temperature": 0.7
         },
         "image": {
             "max_longest_edge_px": 1540,
@@ -41,13 +38,15 @@
         }
     },
     "md_mrg": {
-        "score": {
+        "merge_score": {
             "system_prompt": "data/prompts/md_mrg_score_system_prompt.md",
             "assistant_prompt": "",
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "top_k": 0,
-            "min_p": 0.05
+            "temperature": 0.7
+        },
+        "merge_summary": {
+            "system_prompt": "data/prompts/md_mrg_merge_summary_system_prompt.md",
+            "assistant_prompt": "",
+            "temperature": 0.7
         }
     }
 }

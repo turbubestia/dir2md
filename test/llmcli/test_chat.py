@@ -41,11 +41,12 @@ def _make_config(output_dir: Path) -> AppConfig:
             min_p=0.05,
         ),
         md_gen=MdGenSettings(
-            prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary prompt"),
+            prompts=PromptSettings(system_path="", system_text="summary prompt", assistant_path="", assistant_text=""),
             image=ImageSettings(max_longest_edge_px=1540, token_threshold=16000),
         ),
         md_mrg=MdMrgSettings(
-            score=PromptSettings(summary_prompt_path=None, summary_prompt_text="score prompt")
+            score=PromptSettings(system_path="", system_text="score prompt", assistant_path="", assistant_text=""),
+            summary=PromptSettings(system_path="", system_text="summary prompt", assistant_path="", assistant_text=""),
         ),
         runtime=RuntimeSettings(dry_run=False, overwrite=False, verbose=False),
     )

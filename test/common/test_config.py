@@ -32,7 +32,7 @@ def test_build_config_from_overrides_uses_sparse_precedence_and_warns_once_for_d
     overrides = {
         "paths": {"source_dir": str(override_source)},
         "language_model": {"model": "override-language"},
-        "md_gen": {"summary": {"prompt_path": str(override_prompt)}},
+        "md_gen": {"summary": {"system_prompt": str(override_prompt)}},
         "runtime": {"overwrite": True},
     }
     settings_document = {
@@ -58,10 +58,13 @@ def test_build_config_from_overrides_uses_sparse_precedence_and_warns_once_for_d
             "min_p": 0.02,
         },
         "md_gen": {
-            "summary": {"prompt_path": str(settings_prompt)},
+            "summary": {"system_prompt": str(settings_prompt), "assistant_prompt": ""},
             "image": {"max_longest_edge_px": 1800, "token_threshold": 9000},
         },
-        "md_mrg": {"score": {"prompt_path": str(score_prompt)}},
+        "md_mrg": {
+            "merge_score": {"system_prompt": str(score_prompt), "assistant_prompt": ""},
+            "merge_summary": {"system_prompt": str(score_prompt), "assistant_prompt": ""},
+        },
         "runtime": {"dry_run": True, "overwrite": False},
     }
 
@@ -75,9 +78,18 @@ def test_build_config_from_overrides_uses_sparse_precedence_and_warns_once_for_d
     assert app_config.ocr_model.model_name == "ocr-model"
     assert app_config.language_model.endpoint_url == "http://settings-language"
     assert app_config.language_model.model_name == "override-language"
-    assert app_config.md_gen.prompts.summary_prompt_path == override_prompt.resolve()
-    assert app_config.md_gen.prompts.summary_prompt_text == "override summary"
-    assert app_config.md_mrg.score.summary_prompt_path == score_prompt.resolve()
+    assert app_config.md_gen.prompts.system_path == str(override_prompt.resolve())
+    assert app_config.md_gen.prompts.system_text == "override summary"
+    assert app_config.md_gen.prompts.assistant_path == ""
+    assert app_config.md_gen.prompts.assistant_text == ""
+    assert app_config.md_mrg.score.system_path == str(score_prompt.resolve())
+    assert app_config.md_mrg.score.system_text == "score prompt"
+    assert app_config.md_mrg.score.assistant_path == ""
+    assert app_config.md_mrg.score.assistant_text == ""
+    assert app_config.md_mrg.summary.system_path == str(score_prompt.resolve())
+    assert app_config.md_mrg.summary.system_text == "score prompt"
+    assert app_config.md_mrg.summary.assistant_path == ""
+    assert app_config.md_mrg.summary.assistant_text == ""
     assert app_config.runtime.dry_run is True
     assert app_config.runtime.overwrite is True
     assert app_config.runtime.verbose is False
@@ -93,8 +105,11 @@ def test_build_config_from_overrides_leaves_unresolved_shared_paths_empty_when_m
 
     app_config = config.build_config_from_overrides(
         {
-            "md_gen": {"summary": {"prompt_path": str(prompt_file)}},
-            "md_mrg": {"score": {"prompt_path": str(prompt_file)}},
+            "md_gen": {"summary": {"system_prompt": str(prompt_file)}},
+            "md_mrg": {
+                "merge_score": {"system_prompt": str(prompt_file)},
+                "merge_summary": {"system_prompt": str(prompt_file)},
+            },
         },
         {},
     )
@@ -110,5 +125,5 @@ def test_build_config_from_overrides_falls_back_to_default_score_prompt(monkeypa
 
     app_config = config.build_config_from_overrides({}, {})
 
-    assert app_config.md_mrg.score.summary_prompt_path == default_prompt.resolve()
-    assert app_config.md_mrg.score.summary_prompt_text == "default score prompt"
+    assert app_config.md_mrg.score.system_path == str(default_prompt.resolve())
+    assert app_config.md_mrg.score.system_text == "default score prompt"

@@ -67,7 +67,7 @@ def _validate_plan_inputs(source_dir: Path | None, cfg: AppConfig) -> None:
         raise PlannerError("language_model_endpoint_not_specified", "Language model endpoint must be configured before planning starts")
     if cfg.language_model.model_name is None:
         raise PlannerError("language_model_name_not_specified", "Language model name must be configured before planning starts")
-    if cfg.md_mrg.score.summary_prompt_text is None:
+    if not cfg.md_mrg.score.system_text.strip():
         raise PlannerError("md_mrg_score_prompt_missing", "Merge scoring prompt must be configured before planning starts")
 
 
@@ -343,7 +343,7 @@ def run_plan(
             groups = _build_groups(
                 source_dir=source_dir,
                 gateway=gateway,
-                score_prompt=cfg.md_mrg.score.summary_prompt_text,
+                score_prompt=cfg.md_mrg.score.system_text,
                 image_documents=image_documents,
                 progress_callback=progress_callback,
                 total_comparisons=total_comparisons,

@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from webapp.backend.app import create_app
+from webapp.backend.workflow import WorkflowServiceError, _read_prompt
 from md_gen.progress import GenerationProgressEvent
 from md_mrg import apply as apply_mod
 from md_mrg.planner import PlanningProgressEvent
@@ -38,11 +39,24 @@ def _settings_payload(source_folder: str = "", output_folder: str = "") -> dict:
             "max_retries": 3,
         },
         "md_gen": {
-            "summary": {"prompt_path": "data/prompts/md_gen_summary_system_prompt.md"},
+            "summary": {
+                "system_prompt": "data/prompts/md_gen_summary_system_prompt.md",
+                "assistant_prompt": "",
+                "temperature": 0.7,
+            },
             "image": {"max_longest_edge_px": 1540, "token_threshold": 4096},
         },
         "md_mrg": {
-            "score": {"prompt_path": "data/prompts/md_mrg_score_system_prompt.md"},
+            "merge_score": {
+                "system_prompt": "data/prompts/md_mrg_score_system_prompt.md",
+                "assistant_prompt": "",
+                "temperature": 0.7,
+            },
+            "merge_summary": {
+                "system_prompt": "data/prompts/md_mrg_merge_summary_system_prompt.md",
+                "assistant_prompt": "",
+                "temperature": 0.7,
+            },
         },
     }
 
@@ -746,3 +760,194 @@ def test_workflow_events_streams_current_state_first(workflow_paths) -> None:
     assert data_line.startswith("data: ")
     payload = json.loads(data_line.removeprefix("data: "))
     assert payload["ocr_status"] == "idle"
+
+
+def _llm_test_client(tmp_path: Path) -> tuple[TestClient, Path]:
+    """Create a client whose settings live under tmp_path/data/config so temp prompts land in tmp_path/data/temp."""
+    config_dir = tmp_path / "data" / "config"
+    config_dir.mkdir(parents=True)
+    settings_path = config_dir / "settings.json"
+    defaults_path = config_dir / "settings-default.json"
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    defaults_path.write_text(json.dumps(_settings_payload()), encoding="utf-8")
+    settings_path.write_text(json.dumps(_settings_payload(str(source), str(output))), encoding="utf-8")
+    app = create_app(
+        settings_path=settings_path,
+        defaults_path=defaults_path,
+        allowed_origins=["http://localhost:5173"],
+    )
+    return TestClient(app), tmp_path
+
+
+def test_get_llm_test_prompt_returns_empty_for_missing_file(tmp_path: Path) -> None:
+    client, _ = _llm_test_client(tmp_path)
+    response = client.get("/api/llm-test-prompt/system")
+    assert response.status_code == 200
+    assert response.text == ""
+
+
+def test_get_llm_test_prompt_returns_existing_text(tmp_path: Path) -> None:
+    client, root = _llm_test_client(tmp_path)
+    prompt_path = root / "data" / "temp" / "llm_test_user.md"
+    prompt_path.parent.mkdir(parents=True)
+    prompt_path.write_text("hello user", encoding="utf-8")
+
+    response = client.get("/api/llm-test-prompt/user")
+
+    assert response.status_code == 200
+    assert response.text == "hello user"
+
+
+def test_get_llm_test_prompt_rejects_invalid_name(tmp_path: Path) -> None:
+    client, _ = _llm_test_client(tmp_path)
+    response = client.get("/api/llm-test-prompt/admin")
+    assert response.status_code == 400
+
+
+def test_put_llm_test_prompt_creates_temp_directory_and_writes_file(tmp_path: Path) -> None:
+    client, root = _llm_test_client(tmp_path)
+    prompt_path = root / "data" / "temp" / "llm_test_system.md"
+
+    response = client.put(
+        "/api/llm-test-prompt/system",
+        content="system prompt text",
+        headers={"Content-Type": "text/plain"},
+    )
+
+    assert response.status_code == 200
+    assert prompt_path.exists()
+    assert prompt_path.read_text(encoding="utf-8") == "system prompt text"
+
+
+def test_put_llm_test_prompt_rejects_invalid_name(tmp_path: Path) -> None:
+    client, _ = _llm_test_client(tmp_path)
+    response = client.put(
+        "/api/llm-test-prompt/evil",
+        content="x",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert response.status_code == 400
+
+
+def _wait_for_llm_test_state(client: TestClient, timeout: float = 2.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = client.get("/api/workflow/state").json()
+        if state["llm_test_status"] in ("complete", "failed"):
+            return state
+        time.sleep(0.01)
+    return client.get("/api/workflow/state").json()
+
+
+def test_post_llm_test_starts_job_and_returns_running_state(tmp_path: Path) -> None:
+    client, root = _llm_test_client(tmp_path)
+    system_path = root / "data" / "temp" / "llm_test_system.md"
+    user_path = root / "data" / "temp" / "llm_test_user.md"
+    system_path.parent.mkdir(parents=True, exist_ok=True)
+    system_path.write_text("system", encoding="utf-8")
+    user_path.write_text("user", encoding="utf-8")
+
+    response = client.post(
+        "/api/workflow/llm-test",
+        json={
+            "system_path": str(system_path),
+            "user_path": str(user_path),
+            "assistant_path": "",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["llm_test_status"] == "running"
+
+
+def test_post_llm_test_completes_with_mocked_response(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, root = _llm_test_client(tmp_path)
+    system_path = root / "data" / "temp" / "llm_test_system.md"
+    user_path = root / "data" / "temp" / "llm_test_user.md"
+    system_path.parent.mkdir(parents=True, exist_ok=True)
+    system_path.write_text("system", encoding="utf-8")
+    user_path.write_text("user", encoding="utf-8")
+
+    def fake_run(config, system, user, assistant):
+        return "mocked response text"
+
+    monkeypatch.setattr("webapp.backend.workflow.run_chat_return_text", fake_run)
+
+    response = client.post(
+        "/api/workflow/llm-test",
+        json={
+            "system_path": str(system_path),
+            "user_path": str(user_path),
+            "assistant_path": "",
+        },
+    )
+    assert response.status_code == 200
+
+    state = _wait_for_llm_test_state(client)
+    assert state["llm_test_status"] == "complete"
+    assert state["llm_test_result"]["text"] == "mocked response text"
+    assert state["llm_test_result"]["error"] is None
+
+
+def test_post_llm_test_fails_when_chat_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, root = _llm_test_client(tmp_path)
+    system_path = root / "data" / "temp" / "llm_test_system.md"
+    user_path = root / "data" / "temp" / "llm_test_user.md"
+    system_path.parent.mkdir(parents=True, exist_ok=True)
+    system_path.write_text("system", encoding="utf-8")
+    user_path.write_text("user", encoding="utf-8")
+
+    def fake_run(config, system, user, assistant):
+        raise RuntimeError("mocked chat failure")
+
+    monkeypatch.setattr("webapp.backend.workflow.run_chat_return_text", fake_run)
+
+    response = client.post(
+        "/api/workflow/llm-test",
+        json={
+            "system_path": str(system_path),
+            "user_path": str(user_path),
+            "assistant_path": "",
+        },
+    )
+    assert response.status_code == 200
+
+    state = _wait_for_llm_test_state(client)
+    assert state["llm_test_status"] == "failed"
+    assert state["llm_test_result"]["error"] is not None
+    assert "mocked chat failure" in state["llm_test_result"]["error"]["message"]
+
+
+def test_read_prompt_allows_missing_assistant_file(tmp_path: Path) -> None:
+    system_path = tmp_path / "system.md"
+    system_path.write_text("system prompt", encoding="utf-8")
+
+    prompt = _read_prompt(str(system_path), str(tmp_path / "missing.md"), "test")
+
+    assert prompt.system_path == str(system_path.resolve())
+    assert prompt.system_text == "system prompt"
+    assert prompt.assistant_path == ""
+    assert prompt.assistant_text == ""
+
+
+def test_read_prompt_rejects_missing_system_file(tmp_path: Path) -> None:
+    with pytest.raises(WorkflowServiceError) as exc_info:
+        _read_prompt(str(tmp_path / "missing.md"), "", "test")
+
+    assert exc_info.value.status_code == 400
+    assert "system prompt" in str(exc_info.value)
+
+
+def test_read_prompt_rejects_empty_system_file(tmp_path: Path) -> None:
+    system_path = tmp_path / "system.md"
+    system_path.write_text("   \n", encoding="utf-8")
+
+    with pytest.raises(WorkflowServiceError) as exc_info:
+        _read_prompt(str(system_path), "", "test")
+
+    assert exc_info.value.status_code == 400
+    assert "empty" in str(exc_info.value).lower()

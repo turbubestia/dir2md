@@ -15,7 +15,7 @@ def _make_config() -> AppConfig:
             output_dir=Path("/out"),
         ),
         md_gen=MdGenSettings(
-            prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summarize"),
+            prompts=PromptSettings(system_path="", system_text="summarize", assistant_path="", assistant_text=""),
             image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096),
         ),
         ocr_model=LlamaModelSettings(
@@ -30,7 +30,10 @@ def _make_config() -> AppConfig:
             request_timeout_seconds=120.0,
             request_max_retries=2,
         ),
-        md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=Path("/score"), summary_prompt_text="score")),
+        md_mrg=MdMrgSettings(
+            score=PromptSettings(system_path="/score", system_text="score", assistant_path="", assistant_text=""),
+            summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
+        ),
         runtime=RuntimeSettings(dry_run=False, overwrite=False),
     )
 

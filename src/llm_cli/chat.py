@@ -34,50 +34,23 @@ def _dump_raw_response_json(config: AppConfig, raw_response: dict[str, Any]) -> 
 
     print(f"Raw response saved to: {output_path}")
 
-def run_chat(config: AppConfig, system: Path, user: Path, assistant: Path | None = None) -> int:
-    try:
-        _validate_chat_inputs(config)
-    except ValueError as exc:
-        print(f"ERROR sending chat request: {exc}")
-        return 1
 
-    # read system prompt file
+def _read_prompt_file(path: Path, label: str) -> str:
     try:
-        with system.open("r", encoding="utf-8") as f:
-            system_prompt = f.read()
+        with path.open("r", encoding="utf-8") as f:
+            return f.read()
     except Exception as exc:
-        print(f"ERROR reading system prompt file: {exc}")
-        return 1
+        raise ValueError(f"ERROR reading {label} prompt file: {exc}") from exc
 
-    # read user prompt file
-    try:
-        with user.open("r", encoding="utf-8") as f:
-            user_prompt = f.read()
-    except Exception as exc:
-        print(f"ERROR reading user prompt file: {exc}")
-        return 1
-    
-    assistant_prompt = ""
-    if assistant is not None:
-        try:
-            with assistant.open("r", encoding="utf-8") as f:
-                assistant_prompt = f.read()
-        except Exception as exc:
-            print(f"ERROR reading assistant prompt file: {exc}")
-            return 1
 
-    print("Running chat...")
+def _send_chat_request(config: AppConfig, system_prompt: str, user_prompt: str, assistant_prompt: str) -> TextResponse:
+    _validate_chat_inputs(config)
 
     request = TextRequest(
-        system_prompt=system_prompt, 
-        user_prompt=user_prompt, 
-        assistant_prompt=assistant_prompt
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        assistant_prompt=assistant_prompt,
     )
-
-    if config.language_model.endpoint_url is None:
-        raise ValueError("Language model endpoint must be configured before chat starts")
-    if config.language_model.model_name is None:
-        raise ValueError("Language model name must be configured before chat starts")
 
     gateway = LlamaLanguageGateway(
         endpoint_url=config.language_model.endpoint_url,
@@ -87,14 +60,31 @@ def run_chat(config: AppConfig, system: Path, user: Path, assistant: Path | None
     gateway.top_p = config.language_model.top_p
     gateway.top_k = config.language_model.top_k
     gateway.min_p = config.language_model.min_p
-    
+
+    return gateway.send_text_request(request)
+
+
+def run_chat_return_text(config: AppConfig, system: Path, user: Path, assistant: Path | None = None) -> str:
+    system_prompt = _read_prompt_file(system, "system")
+    user_prompt = _read_prompt_file(user, "user")
+    assistant_prompt = _read_prompt_file(assistant, "assistant") if assistant is not None else ""
+
+    response = _send_chat_request(config, system_prompt, user_prompt, assistant_prompt)
+    _dump_raw_response_json(config, response.raw_response)
+    return response.text
+
+
+def run_chat(config: AppConfig, system: Path, user: Path, assistant: Path | None = None) -> int:
     try:
-        response: TextResponse = gateway.send_text_request(request)
-        print("Chat response:")
-        print(response.text)
-        _dump_raw_response_json(config, response.raw_response)
+        response_text = run_chat_return_text(config, system, user, assistant)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
     except GatewayError as exc:
         print(f"ERROR sending chat request: {exc}")
         return 1
 
+    print("Running chat...")
+    print("Chat response:")
+    print(response_text)
     return 0

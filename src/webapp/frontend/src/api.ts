@@ -2,8 +2,7 @@ import type {
   AppSettings,
   EditableImagePage,
   EditableMergePlan,
-  EditablePdfDocument,
-  MarkdownPreviewResponse,
+  EditablePdfDocument,  LlmTestRequest,  MarkdownPreviewResponse,
   ValidationError,
   WorkflowDiscoveryResponse,
   WorkflowMergeResultItem,
@@ -14,6 +13,28 @@ import type {
 
 const API_BASE = ''
 export const WORKFLOW_EVENTS_URL = `${API_BASE}/api/workflow/events`
+
+function extractErrorMessage(body: unknown, fallback: string): string {
+  if (body === null || body === undefined) {
+    return fallback
+  }
+  if (typeof body === 'string') {
+    return body
+  }
+  if (typeof body === 'object' && 'detail' in body) {
+    const detail = (body as { detail: unknown }).detail
+    if (typeof detail === 'string') {
+      return detail
+    }
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .join('; ')
+    }
+    return JSON.stringify(detail)
+  }
+  return JSON.stringify(body)
+}
 
 export async function fetchSettings(): Promise<AppSettings> {
   const response = await fetch(`${API_BASE}/api/settings`)
@@ -154,6 +175,50 @@ export function buildSourcePreviewUrl(
   item: WorkflowSourceFile,
 ): string | undefined {
   return item.preview_url ?? undefined
+}
+
+export async function fetchLlmTestPrompt(
+  name: 'system' | 'user' | 'assistant',
+): Promise<string> {
+  const response = await fetch(`${API_BASE}/api/llm-test-prompt/${encodeURIComponent(name)}`)
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(extractErrorMessage(body, `Failed to load ${name} prompt (${response.status})`))
+  }
+
+  return response.text()
+}
+
+export async function saveLlmTestPrompt(
+  name: 'system' | 'user' | 'assistant',
+  text: string,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/llm-test-prompt/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'text/plain' },
+    body: text,
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(extractErrorMessage(body, `Failed to save ${name} prompt (${response.status})`))
+  }
+}
+
+export async function startLlmTest(request: LlmTestRequest): Promise<WorkflowState> {
+  const response = await fetch(`${API_BASE}/api/workflow/llm-test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.detail || `LLM test failed (${response.status})`)
+  }
+
+  return response.json()
 }
 
 export function buildOcrArtifactPreviewUrl(

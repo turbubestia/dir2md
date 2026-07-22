@@ -141,14 +141,24 @@ def app_settings_to_shared_overrides(payload: AppSettings) -> dict[str, Any]:
             "max_retries": payload.language_model.max_retries,
         },
         "md_gen": {
-            "summary": {"prompt_path": payload.md_gen.summary.prompt_path},
+            "summary": {
+                "system_prompt": payload.md_gen.summary.system_prompt or None,
+                "assistant_prompt": payload.md_gen.summary.assistant_prompt or None,
+            },
             "image": {
                 "max_longest_edge_px": payload.md_gen.image.max_longest_edge_px,
                 "token_threshold": payload.md_gen.image.token_threshold,
             },
         },
         "md_mrg": {
-            "score": {"prompt_path": payload.md_mrg.score.prompt_path},
+            "merge_score": {
+                "system_prompt": payload.md_mrg.score.system_prompt or None,
+                "assistant_prompt": payload.md_mrg.score.assistant_prompt or None,
+            },
+            "merge_summary": {
+                "system_prompt": payload.md_mrg.summary.system_prompt or None,
+                "assistant_prompt": payload.md_mrg.summary.assistant_prompt or None,
+            },
         },
         "runtime": {
             "verbose": payload.verbose or None,

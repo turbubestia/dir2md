@@ -40,8 +40,7 @@ def _validate_generation_inputs(config: AppConfig) -> None:
     if output_dir is None:
         raise ConfigValidationError("output_directory_not_specified", "--output must be configured before generation starts")
 
-    prompt_text = config.md_gen.prompts.summary_prompt_text
-    if prompt_text is None:
+    if not config.md_gen.prompts.system_text.strip():
         raise ConfigValidationError("summary_prompt_not_specified", "Summary prompt must be configured before generation starts")
 
 

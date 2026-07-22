@@ -93,7 +93,7 @@ def test_cli_verbose_prints_dump_before_bootstrap(monkeypatch) -> None:
         order.append("bootstrap")
         return 0
 
-    monkeypatch.setattr("md_gen.cli.build_config_from_args", fake_build_config_from_args)
+    monkeypatch.setattr("md_gen.cli.build_config_overrides", fake_build_config_from_args)
     monkeypatch.setattr("md_gen.cli.format_config_dump", fake_format_config_dump)
     monkeypatch.setattr("md_gen.cli.run_foundation_bootstrap", fake_bootstrap)
     monkeypatch.setattr("builtins.print", fake_print)
@@ -122,7 +122,7 @@ def test_cli_non_verbose_does_not_format_dump(monkeypatch) -> None:
     def fail_format_config_dump(config):
         raise AssertionError("format_config_dump must not be called when --verbose is absent")
 
-    monkeypatch.setattr("md_gen.cli.build_config_from_args", fake_build_config_from_args)
+    monkeypatch.setattr("md_gen.cli.build_config_overrides", fake_build_config_from_args)
     monkeypatch.setattr("md_gen.cli.format_config_dump", fail_format_config_dump)
     monkeypatch.setattr("md_gen.cli.run_foundation_bootstrap", lambda config: 0)
 
@@ -146,10 +146,10 @@ def test_run_generation_emits_stage_batch_and_complete_events(monkeypatch, tmp_p
 
     config = AppConfig(
         paths=PathSettings(source_dir=source_dir, output_dir=output_dir),
-        md_gen=MdGenSettings(prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"), image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096)),
+        md_gen=MdGenSettings(prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""), image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096)),
         ocr_model=LlamaModelSettings(endpoint_url="http://127.0.0.1:8080/v1", model_name="ocr", request_timeout_seconds=1, request_max_retries=0),
         language_model=LlamaModelSettings(endpoint_url="http://127.0.0.1:8081/v1", model_name="lang", request_timeout_seconds=1, request_max_retries=0),
-        md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=None, summary_prompt_text="score")),
+        md_mrg=MdMrgSettings(score=PromptSettings(system_path="", system_text="score", assistant_path="", assistant_text=""), summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text="")),
         runtime=RuntimeSettings(dry_run=False, overwrite=True),
     )
     items = [

@@ -70,7 +70,7 @@ def _validate_apply_inputs(source_dir: Path | None, cfg: AppConfig) -> None:
         raise ApplyError("language_model_endpoint_not_specified", "Language model endpoint must be configured before apply starts")
     if cfg.language_model.model_name is None:
         raise ApplyError("language_model_name_not_specified", "Language model name must be configured before apply starts")
-    if cfg.md_gen.prompts.summary_prompt_text is None:
+    if not cfg.md_gen.prompts.system_text.strip():
         raise ApplyError("summary_prompt_not_specified", "Summary prompt must be configured before apply starts")
 
 

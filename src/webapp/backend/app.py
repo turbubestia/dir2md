@@ -11,14 +11,15 @@ import queue
 from pathlib import Path
 from typing import Sequence
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import ValidationError
 
 from .models import (
     AppSettings,
     EditableMergePlan,
+    LlmTestRequest,
     MarkdownPreviewResponse,
     WorkflowDiscoveryResponse,
     WorkflowMergeRequest,
@@ -61,6 +62,8 @@ def create_app(
 
     origins = list(allowed_origins if allowed_origins is not None else DEFAULT_ALLOWED_ORIGINS)
     workflow_service = WorkflowService()
+    temp_dir = settings_path.parent.parent / "temp"
+
     application.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -199,6 +202,46 @@ def create_app(
         except WorkflowServiceError as exc:
             return JSONResponse(
                 status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/llm-test-prompt/{name}")
+    def get_llm_test_prompt(name: str) -> PlainTextResponse:
+        if name not in {"system", "user", "assistant"}:
+            return PlainTextResponse("Invalid prompt name.", status_code=400)
+        prompt_path = temp_dir / f"llm_test_{name}.md"
+        try:
+            text = prompt_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        return PlainTextResponse(text)
+
+    @application.put("/api/llm-test-prompt/{name}")
+    def put_llm_test_prompt(name: str, text: str = Body("", media_type="text/plain")) -> PlainTextResponse:
+        if name not in {"system", "user", "assistant"}:
+            return PlainTextResponse("Invalid prompt name.", status_code=400)
+        prompt_path = temp_dir / f"llm_test_{name}.md"
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            prompt_path.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            return PlainTextResponse(f"Failed to write prompt file: {exc}", status_code=500)
+        return PlainTextResponse("OK")
+
+    @application.post("/api/workflow/llm-test")
+    def post_workflow_llm_test(request: LlmTestRequest) -> WorkflowState:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
+            return workflow_service.start_llm_test(settings, request)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
                 content={"detail": str(exc)},
             )  # type: ignore[return-value]
         except WorkflowServiceError as exc:

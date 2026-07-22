@@ -33,10 +33,13 @@ def _make_config(tmp_path: Path, file_names: tuple[str, ...]) -> tuple[AppConfig
 		ocr_model=LlamaModelSettings(endpoint_url="http://ocr", model_name="ocr"),
 		language_model=LlamaModelSettings(endpoint_url="http://lang", model_name="lang"),
 		md_gen=MdGenSettings(
-			prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"),
+			prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
 			image=ImageSettings(),
 		),
-		md_mrg=MdMrgSettings(score=PromptSettings(summary_prompt_path=None, summary_prompt_text="score")),
+		md_mrg=MdMrgSettings(
+			score=PromptSettings(system_path="", system_text="score", assistant_path="", assistant_text=""),
+			summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
+		),
 		runtime=RuntimeSettings(),
 	)
 	return config, source_dir
