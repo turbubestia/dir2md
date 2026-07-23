@@ -17,6 +17,17 @@ def _append_model(lines: list[str], section: str, model: object) -> None:
 
 
 def format_config_dump(config: AppConfig, command: str = "md-gen") -> str:
+    """Return a human-readable config dump for CLI startup logging.
+
+    Args:
+        config: The resolved :class:`AppConfig` instance to serialize.
+        command: The CLI command name — ``"md-gen"`` (default) or ``"md-mrg"``.
+                 Controls which section keys are included in the output.
+
+    Returns:
+        A multi-line string wrapped in ``=== ... startup config dump ===``
+        markers, suitable for printing to stdout/stderr at program start.
+    """
     if command == "md-mrg":
         lines = [
             "=== md-mrg startup config dump ===",

@@ -4,6 +4,7 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
+    "chat.byokUtilityModelDefault": "copilot",
     "chat.utilityModel": "",
     "chat.utilitySmallModel": ""
 }
