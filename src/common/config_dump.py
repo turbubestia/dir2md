@@ -20,25 +20,6 @@ def _append_model(lines: list[str], section: str, model: LlamaModelSettings) -> 
     )
 
 
-<<<<<<< HEAD
-def format_config_dump(config: AppConfig, command: str = "md-gen") -> str:
-    """Return a human-readable config dump for CLI startup logging.
-
-    Args:
-        config: The resolved :class:`AppConfig` instance to serialize.
-        command: The CLI command name — ``"md-gen"`` (default) or ``"md-mrg"``.
-                 Controls which section keys are included in the output.
-
-    Returns:
-        A multi-line string wrapped in ``=== ... startup config dump ===``
-        markers, suitable for printing to stdout/stderr at program start.
-    """
-    if command == "md-mrg":
-        lines = [
-            "=== md-mrg startup config dump ===",
-            "[paths]",
-            f"source_dir={config.paths.source_dir}",
-=======
 def _append_prompt(lines: list[str], section: str, prompt) -> None:
     lines.extend(
         [
@@ -49,7 +30,6 @@ def _append_prompt(lines: list[str], section: str, prompt) -> None:
             f"assistant_path={prompt.assistant_path}",
             "assistant_text:",
             prompt.assistant_text,
->>>>>>> 0982242c14b77ab616d5279843c1ba26e83ecd10
             "",
         ]
     )

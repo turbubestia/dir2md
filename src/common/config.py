@@ -435,109 +435,6 @@ def _resolve_app_config(overrides: Mapping[str, Any] | None, settings_document: 
             default_top_k=0,
             default_min_p=0.05,
         ),
-<<<<<<< HEAD
-    )
-
-def build_config_from_args(args: SimpleNamespace) -> AppConfig:
-    """Build a fully resolved :class:`AppConfig` from CLI arguments and JSON settings.
-
-    **Design patterns used:**
-
-    1. **Priority Resolution (CLI > JSON > Defaults)**
-       Each setting is resolved with a three-tier fallback:
-       - CLI arguments (highest priority) — e.g. ``args.ocr_model_endpoint``
-       - JSON config file (``settings.json``) — e.g. ``json_config["ocr_model"]["endpoint"]``
-       - Hardcoded defaults — e.g. ``120.0`` seconds for timeout
-       This is implemented via chained ``getattr`` / ``dict.get`` / inline defaults
-       in each ``build_*_from_args`` helper.
-
-    2. **Compositional Construction**
-       The top-level :class:`AppConfig` is assembled from smaller, independently
-       validated dataclass fragments:
-       - :class:`PathSettings` — source/output directories
-       - :class:`PromptSettings` — prompt file path and loaded text
-       - :class:`LlamaModelSettings` — OCR and language model endpoints
-       - :class:`ImageSettings` — image resizing and token thresholds
-       - :class:`MdGenSettings` / :class:`MdMrgSettings` — module-specific configs
-       - :class:`RuntimeSettings` — dry-run and overwrite flags
-       Each fragment is built by a dedicated helper, keeping concerns separated
-       and testable in isolation.
-
-    3. **Fail-Fast Validation**
-       Every required configuration source is validated at build time. Missing or
-       invalid values raise :class:`ConfigValidationError` with a machine-readable
-       ``error_code`` (e.g. ``"md_gen_config_missing"``) and a human-readable message.
-       The function never returns a partially constructed config.
-
-    4. **Argument Namespacing via ``SimpleNamespace``**
-       CLI argument attributes are mapped to a uniform ``model_endpoint`` / ``model_name``
-       schema expected by shared helpers (e.g. :func:`build_llama_model_settings_from_args`)
-       by wrapping them in :class:`~types.SimpleNamespace`. This avoids duplicating the
-       priority-resolution logic for each model type (OCR vs language).
-
-    5. **Immutable Result**
-       The returned :class:`AppConfig` is composed entirely of :class:`frozen <dataclass>`
-       dataclasses, producing an immutable configuration object that is safe to share
-       across modules without defensive copying.
-
-    Args:
-        args: A :class:`~types.SimpleNamespace` containing parsed CLI arguments
-            (``source``, ``output``, ``ocr_model_endpoint``, ``ocr_model_name``,
-            ``ocr_timeout_seconds``, ``ocr_max_retries``, ``language_model_endpoint``,
-            ``language_model_name``, ``language_timeout_seconds``, ``language_max_retries``,
-            ``max_longest_edge_px``, ``token_threshold``, ``dry_run``, ``overwrite``,
-            ``summary_prompt``).
-
-    Returns:
-        A fully resolved :class:`AppConfig` ready for use by ``md_gen`` and ``md_mrg``.
-
-    Raises:
-        ConfigValidationError: If any required configuration is missing or invalid.
-    """
-    # First make sure the settings.json file exists and is valid. Is not, we must write a default one.
-    json_config = read_json_settings_file()
-
-    _paths = build_path_settings_from_args(args)
-
-    md_gen_json = json_config.get("md_gen", {})
-    if not md_gen_json:
-        raise ConfigValidationError(
-            "md_gen_config_missing",
-            "Missing 'md_gen' section in settings.json file.",
-        )
-
-    _prompts = build_prompt_settings_from_args(args, md_gen_json.get("summary", {}))
-
-    _ocr_args = SimpleNamespace(
-        model_endpoint=args.ocr_model_endpoint,
-        model_name=args.ocr_model_name,
-        timeout_seconds=args.ocr_timeout_seconds,
-        max_retries=args.ocr_max_retries,
-    )
-    _ocr_model = build_llama_model_settings_from_args(_ocr_args, json_config.get("ocr_model", {}))
-
-    _language_args = SimpleNamespace(
-        model_endpoint=args.language_model_endpoint,
-        model_name=args.language_model_name,
-        timeout_seconds=args.language_timeout_seconds,
-        max_retries=args.language_max_retries,
-    )
-    _language_model = build_llama_model_settings_from_args(_language_args, json_config.get("language_model", {}))
-
-    _image = build_image_settings_from_args(args, md_gen_json.get("image", {}))
-
-    md_mrg_settings = build_md_mrg_settings_from_json(json_config)
-
-    return AppConfig(
-        paths=_paths,
-        ocr_model=_ocr_model,
-        language_model=_language_model,
-        md_gen=MdGenSettings(prompts=_prompts, image=_image),
-        md_mrg=md_mrg_settings,
-        runtime=RuntimeSettings(
-            dry_run=args.dry_run,
-            overwrite=args.overwrite,
-=======
         language_model=_resolve_model_settings(
             section_name="language_model",
             overrides=normalized_overrides.get("language_model"),
@@ -550,7 +447,6 @@ def build_config_from_args(args: SimpleNamespace) -> AppConfig:
             default_top_p=0.9,
             default_top_k=0,
             default_min_p=0.05,
->>>>>>> 0982242c14b77ab616d5279843c1ba26e83ecd10
         ),
         md_gen=MdGenSettings(
             prompts=_resolve_prompt_settings(
