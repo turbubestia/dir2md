@@ -8,6 +8,7 @@ import {
 } from '../api'
 import type { LlmTestResult, WorkflowState } from '../types'
 import MarkdownViewer, { type MarkdownViewMode } from './MarkdownViewer'
+import MarkdownModeToggle from './MarkdownModeToggle'
 
 const PROMPT_PATHS = {
   system: 'data/temp/llm_test_system.md',
@@ -75,23 +76,11 @@ function PromptEditor({
           {title}
         </span>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1" role="group" aria-label={`${title} view mode`}>
-            {(['code', 'preview'] as const).map((candidate) => (
-              <button
-                key={candidate}
-                type="button"
-                className={`text-xs px-2 py-0.5 rounded border ${
-                  mode === candidate
-                    ? 'bg-shell-border border-shell-border text-shell-text'
-                    : 'border-shell-border text-shell-muted hover:text-shell-text hover:bg-shell-panel'
-                }`}
-                aria-pressed={mode === candidate}
-                onClick={() => onModeChange(candidate)}
-              >
-                {candidate === 'code' ? 'Code' : 'Preview'}
-              </button>
-            ))}
-          </div>
+            <MarkdownModeToggle
+              mode={mode}
+              onModeChange={onModeChange}
+              label={`${title} view mode`}
+            />
           {actions}
         </div>
       </div>
@@ -121,6 +110,7 @@ export default function LlmTestPanel() {
   })
   const [view, setView] = useState<'edit' | 'response'>('edit')
   const [result, setResult] = useState<LlmTestResult | null>(null)
+  const [responseMode, setResponseMode] = useState<MarkdownViewMode>('preview')
   const [status, setStatus] = useState<WorkflowState['llm_test_status']>('idle')
   const [error, setError] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
@@ -184,6 +174,12 @@ export default function LlmTestPanel() {
     }
   }, [])
 
+  useEffect(() => {
+    if (status !== 'running') {
+      setSubmitting(false)
+    }
+  }, [status])
+
   useDebouncedPromptSave('system', editors.system.text, setError)
   useDebouncedPromptSave('user', editors.user.text, setError)
   useDebouncedPromptSave('assistant', editors.assistant.text, setError)
@@ -219,14 +215,21 @@ export default function LlmTestPanel() {
           <h3 className="text-xs font-semibold uppercase tracking-wider text-shell-muted">
             LLM test response
           </h3>
-          <button
-            type="button"
-            onClick={() => setView('edit')}
-            className="btn-ghost text-xs"
-            disabled={status === 'running'}
-          >
-            Back
-          </button>
+          <div className="flex items-center gap-2">
+            <MarkdownModeToggle
+              mode={responseMode}
+              onModeChange={setResponseMode}
+              label="LLM test response view mode"
+            />
+            <button
+              type="button"
+              onClick={() => setView('edit')}
+              className="btn-ghost text-xs"
+              disabled={status === 'running'}
+            >
+              Back
+            </button>
+          </div>
         </div>
         {error && (
           <div className="rounded bg-red-900/30 border border-red-800 px-3 py-1.5 text-sm text-red-300">
@@ -244,7 +247,7 @@ export default function LlmTestPanel() {
         <div className="flex-1 min-h-0 border border-shell-border rounded bg-shell-panel/50">
           <MarkdownViewer
             content={result?.text ?? ''}
-            mode="preview"
+            mode={responseMode}
             className="h-full p-2"
           />
         </div>

@@ -1,1 +1,1 @@
-<think>Why is he saying that
+<think>

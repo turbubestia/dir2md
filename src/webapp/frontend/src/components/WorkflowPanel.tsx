@@ -16,6 +16,7 @@ import {
   startWorkflowOcr,
 } from '../api'
 import MarkdownViewer from './MarkdownViewer'
+import MarkdownModeToggle from './MarkdownModeToggle'
 import type {
   DragPageState,
   DropTarget,
@@ -885,19 +886,10 @@ export default function WorkflowPanel() {
         <section className="workflow-panel workflow-preview-panel">
           <div className="workflow-panel-heading">
             <h3 className="workflow-panel-title">Markdown</h3>
-            <div className="workflow-markdown-toggle" role="group" aria-label="Markdown view mode">
-              {(['code', 'preview'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={markdownViewMode === mode ? 'workflow-markdown-toggle-active' : ''}
-                  aria-pressed={markdownViewMode === mode}
-                  onClick={() => setMarkdownViewMode(mode)}
-                >
-                  {mode === 'code' ? 'Code' : 'Preview'}
-                </button>
-              ))}
-            </div>
+            <MarkdownModeToggle
+              mode={markdownViewMode}
+              onModeChange={setMarkdownViewMode}
+            />
           </div>
           <RightPanel
             selectedStage={selectedStage}

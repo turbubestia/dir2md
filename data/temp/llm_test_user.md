@@ -1,1 +1,1 @@
-Hello
+Hello, write a simple C++ code
