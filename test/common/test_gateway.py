@@ -114,6 +114,7 @@ def test_build_text_summary_payload_uses_system_and_user_messages() -> None:
         request = TextRequest(
             system_prompt="Make a summary of the following text.",
             user_prompt="OCR markdown output",
+            assistant_prompt="",
         )
         messages = gateway.build_text_request_messages(request)
         payload = gateway._build_payload(messages)
@@ -121,7 +122,7 @@ def test_build_text_summary_payload_uses_system_and_user_messages() -> None:
         assert payload["messages"][0]["role"] == "system"
         assert payload["messages"][1]["role"] == "user"
         assert payload["messages"][1]["content"] == "OCR markdown output"
-        assert payload["temperature"] == 0.8
+        assert payload["temperature"] == 0.7
 
 
 def test_language_gateway_keeps_generic_text_response() -> None:
@@ -143,6 +144,6 @@ def test_language_gateway_keeps_generic_text_response() -> None:
         model_name="qwen3-1.7b",
         client=client,
     ) as gateway:
-        request = TextRequest(system_prompt="Return raw text", user_prompt="Give me an invoice summary")
+        request = TextRequest(system_prompt="Return raw text", user_prompt="Give me an invoice summary", assistant_prompt="")
         response = gateway.send_text_request(request)
         assert response.text == "Invoice #123\nTotal: $500.00"

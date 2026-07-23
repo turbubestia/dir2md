@@ -38,7 +38,9 @@ def tmp_settings_paths(tmp_path: Path):
                 },
                 "md_gen": {
                     "summary": {
-                        "prompt_path": "data/prompts/md_gen_summary_system_prompt.md",
+                        "system_prompt": "data/prompts/md_gen_summary_system_prompt.md",
+                        "assistant_prompt": "",
+                        "temperature": 0.7,
                     },
                     "image": {
                         "max_longest_edge_px": 1540,
@@ -46,8 +48,15 @@ def tmp_settings_paths(tmp_path: Path):
                     },
                 },
                 "md_mrg": {
-                    "score": {
-                        "prompt_path": "data/prompts/md_mrg_score_system_prompt.md",
+                    "merge_score": {
+                        "system_prompt": "data/prompts/md_mrg_score_system_prompt.md",
+                        "assistant_prompt": "",
+                        "temperature": 0.7,
+                    },
+                    "merge_summary": {
+                        "system_prompt": "data/prompts/md_mrg_merge_summary_system_prompt.md",
+                        "assistant_prompt": "",
+                        "temperature": 0.7,
                     },
                 },
             },
@@ -93,7 +102,9 @@ def valid_payload():
         },
         "md_gen": {
             "summary": {
-                "prompt_path": "data/prompts/md_gen_summary_system_prompt.md",
+                "system_prompt": "data/prompts/md_gen_summary_system_prompt.md",
+                "assistant_prompt": "",
+                "temperature": 0.7,
             },
             "image": {
                 "max_longest_edge_px": 1540,
@@ -101,8 +112,15 @@ def valid_payload():
             },
         },
         "md_mrg": {
-            "score": {
-                "prompt_path": "data/prompts/md_mrg_score_system_prompt.md",
+            "merge_score": {
+                "system_prompt": "data/prompts/md_mrg_score_system_prompt.md",
+                "assistant_prompt": "",
+                "temperature": 0.7,
+            },
+            "merge_summary": {
+                "system_prompt": "data/prompts/md_mrg_merge_summary_system_prompt.md",
+                "assistant_prompt": "",
+                "temperature": 0.7,
             },
         },
     }

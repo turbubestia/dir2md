@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 md-gen = "md_gen.cli:main"
 md-mrg = "md_mrg.cli:main"
+llm-cli = "llm_cli.cli:main"
 serve = "webapp.serve:main"
 
 [dependency-groups]

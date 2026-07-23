@@ -1,8 +1,7 @@
 from argparse import Namespace
 from pathlib import Path
-from types import SimpleNamespace
 
-from common.config import AppConfig, build_config_from_args
+from common.config import AppConfig, ImageSettings, LlamaModelSettings, MdGenSettings, MdMrgSettings, PathSettings, PromptSettings, RuntimeSettings
 
 from md_gen.discovery import (
 	_is_supported_file,
@@ -13,26 +12,6 @@ from md_gen.discovery import (
 	discover_supported_files,
 	normalize_work_items,
 )
-
-
-def _make_args(source_dir: Path, output_dir: Path) -> SimpleNamespace:
-	return SimpleNamespace(
-		source=str(source_dir),
-		output=str(output_dir),
-		summary_prompt=None,
-		ocr_model_endpoint=None,
-		ocr_model_name=None,
-		ocr_timeout_seconds=None,
-		ocr_max_retries=None,
-		language_model_endpoint=None,
-		language_model_name=None,
-		language_timeout_seconds=None,
-		language_max_retries=None,
-		max_longest_edge_px=None,
-		token_threshold=None,
-		dry_run=False,
-		overwrite=False,
-	)
 
 
 def _make_config(tmp_path: Path, file_names: tuple[str, ...]) -> tuple[AppConfig, Path]:
@@ -49,8 +28,20 @@ def _make_config(tmp_path: Path, file_names: tuple[str, ...]) -> tuple[AppConfig
 			continue
 		path.write_text("dummy", encoding="utf-8")
 
-	args = _make_args(source_dir, output_dir)
-	config = build_config_from_args(args)
+	config = AppConfig(
+		paths=PathSettings(source_dir=source_dir.resolve(), output_dir=output_dir.resolve()),
+		ocr_model=LlamaModelSettings(endpoint_url="http://ocr", model_name="ocr"),
+		language_model=LlamaModelSettings(endpoint_url="http://lang", model_name="lang"),
+		md_gen=MdGenSettings(
+			prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
+			image=ImageSettings(),
+		),
+		md_mrg=MdMrgSettings(
+			score=PromptSettings(system_path="", system_text="score", assistant_path="", assistant_text=""),
+			summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
+		),
+		runtime=RuntimeSettings(),
+	)
 	return config, source_dir
 
 

@@ -20,6 +20,7 @@ from common.config import (
     PromptSettings,
     RuntimeSettings,
 )
+from llm_cli.chat import run_chat_return_text
 from md_gen import foundation as md_gen_foundation
 from md_gen.discovery import build_work_items
 from md_gen.progress import GenerationProgressEvent
@@ -35,6 +36,8 @@ from .models import (
     EditablePdfDocument,
     FolderStatus,
     FolderStatusKind,
+    LlmTestRequest,
+    LlmTestResult,
     MarkdownPreviewResponse,
     WorkflowMergeItem,
     WorkflowMergeResultItem,
@@ -142,6 +145,57 @@ class WorkflowService:
             self._worker.start()
         self._broadcast(state)
         return state
+
+    def start_llm_test(self, settings: AppSettings, request: LlmTestRequest) -> WorkflowState:
+        config = _settings_to_language_model_config(settings)
+
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                raise WorkflowServiceError("A workflow stage is already running.", status_code=409)
+
+            self._state.llm_test_status = "running"
+            self._state.llm_test_result = None
+            self._state.messages = [
+                WorkflowStatusMessage(severity="info", code="llm_test_running", message="LLM test is running.")
+            ]
+            state = self._copy_state()
+            self._worker = threading.Thread(target=self._run_llm_test_worker, args=(config, request), daemon=True)
+            self._worker.start()
+        self._broadcast(state)
+        return state
+
+    def _run_llm_test_worker(self, config: AppConfig, request: LlmTestRequest) -> None:
+        try:
+            system_path = _resolve_prompt_path(request.system_path, "system")
+            user_path = _resolve_prompt_path(request.user_path, "user")
+            assistant_path: Path | None = None
+            if request.assistant_path.strip():
+                assistant_path = _resolve_prompt_path(request.assistant_path, "assistant")
+
+            config = _apply_sampling_overrides(config, request)
+
+            response_text = run_chat_return_text(config, system_path, user_path, assistant_path)
+
+            with self._lock:
+                self._state.llm_test_status = "complete"
+                self._state.llm_test_result = LlmTestResult(text=response_text)
+                self._state.messages = [
+                    WorkflowStatusMessage(severity="success", code="llm_test_complete", message="LLM test completed.")
+                ]
+                state = self._copy_state()
+        except Exception as exc:
+            with self._lock:
+                self._state.llm_test_status = "failed"
+                self._state.llm_test_result = LlmTestResult(
+                    error=WorkflowStatusMessage(
+                        severity="error",
+                        code="llm_test_failed",
+                        message=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+                self._state.messages = [self._state.llm_test_result.error]
+                state = self._copy_state()
+        self._broadcast(state)
 
     def get_merge_results(self, settings: AppSettings) -> WorkflowMergeResultsResponse:
         output_dir = _resolve_output_dir(settings)
@@ -971,7 +1025,7 @@ def _inspect_optional_folder(raw_path: str, *, label: str) -> tuple[FolderStatus
 
 
 def _settings_to_discovery_config(settings: AppSettings, source_dir: Path) -> AppConfig:
-    prompt = PromptSettings(summary_prompt_path=None, summary_prompt_text="")
+    prompt = PromptSettings(system_path="", system_text="", assistant_path="", assistant_text="")
     return AppConfig(
         paths=PathSettings(source_dir=source_dir, output_dir=Path(settings.output_folder).expanduser()),
         ocr_model=_model_settings(settings.ocr_model),
@@ -983,7 +1037,7 @@ def _settings_to_discovery_config(settings: AppSettings, source_dir: Path) -> Ap
                 token_threshold=settings.md_gen.image.token_threshold,
             ),
         ),
-        md_mrg=ConfigMdMrgSettings(score=prompt),
+        md_mrg=ConfigMdMrgSettings(score=prompt, summary=prompt),
         runtime=RuntimeSettings(dry_run=True, overwrite=settings.overwrite),
     )
 
@@ -1002,19 +1056,38 @@ def _settings_to_runtime_config(settings: AppSettings) -> AppConfig:
     if not output_dir.is_dir():
         raise WorkflowServiceError(f"Output path is not a directory: {output_dir}", status_code=400)
 
+    return _settings_to_language_model_config(settings, source_dir=source_dir, output_dir=output_dir)
+
+
+def _settings_to_language_model_config(
+    settings: AppSettings,
+    *,
+    source_dir: Path | None = None,
+    output_dir: Path | None = None,
+) -> AppConfig:
+    paths = PathSettings(
+        source_dir=source_dir,
+        output_dir=output_dir,
+    )
+    empty_prompt = PromptSettings(
+        system_path="",
+        system_text="",
+        assistant_path="",
+        assistant_text="",
+    )
     return AppConfig(
-        paths=PathSettings(source_dir=source_dir, output_dir=output_dir),
+        paths=paths,
         ocr_model=_model_settings(settings.ocr_model),
         language_model=_model_settings(settings.language_model),
         md_gen=ConfigMdGenSettings(
-            prompts=_read_prompt(settings.md_gen.summary.prompt_path, "summary"),
+            prompts=empty_prompt,
             image=ImageSettings(
                 max_longest_edge_px=settings.md_gen.image.max_longest_edge_px,
                 token_threshold=settings.md_gen.image.token_threshold,
             ),
         ),
-        md_mrg=ConfigMdMrgSettings(score=_read_prompt(settings.md_mrg.score.prompt_path, "score")),
-        runtime=RuntimeSettings(dry_run=False, overwrite=settings.overwrite),
+        md_mrg=ConfigMdMrgSettings(score=empty_prompt, summary=empty_prompt),
+        runtime=RuntimeSettings(dry_run=True, overwrite=False),
     )
 
 
@@ -1027,15 +1100,106 @@ def _model_settings(model: Any) -> LlamaModelSettings:
     )
 
 
-def _read_prompt(raw_path: str, label: str) -> PromptSettings:
-    prompt_path = Path(raw_path).expanduser().resolve()
+def _resolve_prompt_path(raw_path: str, label: str) -> Path:
+    path_value = raw_path.strip()
+    if not path_value:
+        raise WorkflowServiceError(f"{label.capitalize()} prompt path is required.", status_code=400)
     try:
-        text = prompt_path.read_text(encoding="utf-8")
+        path = Path(path_value).expanduser().resolve()
+    except OSError as exc:
+        raise WorkflowServiceError(f"Invalid {label} prompt path: {path_value}", status_code=400) from exc
+    if not path.exists() or not path.is_file():
+        raise WorkflowServiceError(f"{label.capitalize()} prompt file not found: {path}", status_code=400)
+    return path
+
+
+def _apply_sampling_overrides(config: AppConfig, request: LlmTestRequest) -> AppConfig:
+    language_model = config.language_model
+    if request.temperature is not None:
+        language_model = LlamaModelSettings(
+            endpoint_url=language_model.endpoint_url,
+            model_name=language_model.model_name,
+            request_timeout_seconds=language_model.request_timeout_seconds,
+            request_max_retries=language_model.request_max_retries,
+            temperature=request.temperature,
+            top_p=language_model.top_p,
+            top_k=language_model.top_k,
+            min_p=language_model.min_p,
+        )
+    if request.top_p is not None:
+        language_model = LlamaModelSettings(
+            endpoint_url=language_model.endpoint_url,
+            model_name=language_model.model_name,
+            request_timeout_seconds=language_model.request_timeout_seconds,
+            request_max_retries=language_model.request_max_retries,
+            temperature=language_model.temperature,
+            top_p=request.top_p,
+            top_k=language_model.top_k,
+            min_p=language_model.min_p,
+        )
+    if request.top_k is not None:
+        language_model = LlamaModelSettings(
+            endpoint_url=language_model.endpoint_url,
+            model_name=language_model.model_name,
+            request_timeout_seconds=language_model.request_timeout_seconds,
+            request_max_retries=language_model.request_max_retries,
+            temperature=language_model.temperature,
+            top_p=language_model.top_p,
+            top_k=request.top_k,
+            min_p=language_model.min_p,
+        )
+    if request.min_p is not None:
+        language_model = LlamaModelSettings(
+            endpoint_url=language_model.endpoint_url,
+            model_name=language_model.model_name,
+            request_timeout_seconds=language_model.request_timeout_seconds,
+            request_max_retries=language_model.request_max_retries,
+            temperature=language_model.temperature,
+            top_p=language_model.top_p,
+            top_k=language_model.top_k,
+            min_p=request.min_p,
+        )
+    return AppConfig(
+        paths=config.paths,
+        ocr_model=config.ocr_model,
+        language_model=language_model,
+        md_gen=config.md_gen,
+        md_mrg=config.md_mrg,
+        runtime=config.runtime,
+    )
+
+
+def _read_prompt(raw_system: str, raw_assistant: str, label: str) -> PromptSettings:
+    system_path_value = raw_system.strip()
+    if not system_path_value:
+        raise WorkflowServiceError(f"{label.capitalize()} system prompt path is required.", status_code=400)
+
+    system_path = Path(system_path_value).expanduser().resolve()
+    try:
+        system_text = system_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        raise WorkflowServiceError(f"Failed to read {label} prompt file: {prompt_path}", status_code=400) from exc
-    if not text.strip():
-        raise WorkflowServiceError(f"{label.capitalize()} prompt file is empty: {prompt_path}", status_code=400)
-    return PromptSettings(summary_prompt_path=prompt_path, summary_prompt_text=text)
+        raise WorkflowServiceError(f"Failed to read {label} system prompt file: {system_path}", status_code=400) from exc
+    if not system_text.strip():
+        raise WorkflowServiceError(f"{label.capitalize()} system prompt file is empty: {system_path}", status_code=400)
+
+    assistant_path = ""
+    assistant_text = ""
+    assistant_path_value = raw_assistant.strip()
+    if assistant_path_value:
+        candidate = Path(assistant_path_value).expanduser().resolve()
+        try:
+            assistant_text = candidate.read_text(encoding="utf-8")
+            assistant_path = str(candidate)
+        except (OSError, UnicodeDecodeError):
+            assistant_path = ""
+            assistant_text = ""
+
+    return PromptSettings(
+        system_path=str(system_path),
+        system_text=system_text,
+        assistant_path=assistant_path,
+        assistant_text=assistant_text,
+    )
 
 
 def _source_file_from_work_item(item, source_dir: Path) -> WorkflowSourceFile:

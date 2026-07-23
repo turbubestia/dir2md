@@ -2,7 +2,7 @@
 
 from .config import (
     AppConfig, 
-    build_config_from_args
+    build_config_from_overrides
 )
 
 # Common errors and exceptions
@@ -26,7 +26,7 @@ from .gateway import (
 
 __all__ = [
     "AppConfig",
-    "build_config_from_args",
+    "build_config_from_overrides",
 # ---
     "GatewayError",
     "GatewayErrorCode",

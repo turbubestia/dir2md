@@ -6,7 +6,9 @@ export interface ModelEndpointSettings {
 }
 
 export interface MdGenSummarySettings {
-  prompt_path: string
+  system_prompt: string
+  assistant_prompt: string
+  temperature: number
 }
 
 export interface MdGenImageSettings {
@@ -20,11 +22,20 @@ export interface MdGenSettings {
 }
 
 export interface MdMrgScoreSettings {
-  prompt_path: string
+  system_prompt: string
+  assistant_prompt: string
+  temperature: number
+}
+
+export interface MdMrgSummarySettings {
+  system_prompt: string
+  assistant_prompt: string
+  temperature: number
 }
 
 export interface MdMrgSettings {
   score: MdMrgScoreSettings
+  summary: MdMrgSummarySettings
 }
 
 export interface AppSettings {
@@ -146,10 +157,27 @@ export interface WorkflowMergeItem {
   message: string | null
 }
 
+export interface LlmTestResult {
+  text: string | null
+  error: WorkflowStatusMessage | null
+}
+
+export interface LlmTestRequest {
+  system_path: string
+  user_path: string
+  assistant_path: string
+  temperature?: number
+  top_p?: number
+  top_k?: number
+  min_p?: number
+}
+
 export interface WorkflowState {
   discovery: WorkflowDiscoveryResponse | null
   ocr_status: WorkflowStageStatus
   merge_status: WorkflowStageStatus
+  llm_test_status: WorkflowStageStatus
+  llm_test_result: LlmTestResult | null
   progress: WorkflowProgress
   counts: WorkflowCounts
   current_item: WorkflowActiveItem | null

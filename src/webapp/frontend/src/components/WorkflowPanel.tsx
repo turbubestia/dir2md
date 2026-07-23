@@ -1,15 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { MathJax, MathJaxContext } from 'better-react-mathjax'
 import { Document, Page, pdfjs } from 'react-pdf'
-import ReactMarkdown from 'react-markdown'
-import rehypeMathjax from 'rehype-mathjax/svg'
-import rehypeRaw from 'rehype-raw'
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import {
   WORKFLOW_EVENTS_URL,
   buildMergeResultPdfPreviewUrl,
@@ -24,6 +15,7 @@ import {
   startWorkflowMerge,
   startWorkflowOcr,
 } from '../api'
+import MarkdownViewer from './MarkdownViewer'
 import type {
   DragPageState,
   DropTarget,
@@ -60,7 +52,8 @@ type StageStatusLine = { label: string; value: string }
 type SourceOcrStatus = 'pending' | 'running' | 'done' | 'failed'
 type PdfZoomMode = 'fit-width' | 'fit-height' | 'actual-size' | 'custom'
 type MarkdownPreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
-type MarkdownViewMode = 'code' | 'preview'
+import type { MarkdownViewMode } from './MarkdownViewer'
+
 type PdfPanState = {
   pointerId: number
   startX: number
@@ -80,17 +73,6 @@ const INITIAL_STAGE_STATES: Record<WorkflowStageKey, WorkflowStageState> = {
 
 const EMPTY_METRICS = { pdf_count: 0, image_count: 0, total_count: 0 }
 const EMPTY_ITEMS: WorkflowSourceFile[] = []
-const MARKDOWN_SANITIZE_SCHEMA = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    code: [
-      ...(defaultSchema.attributes?.code ?? []),
-      ['className', 'language-math', 'math-inline', 'math-display'],
-    ],
-  },
-  tagNames: [...(defaultSchema.tagNames ?? []), 'mark'],
-}
 
 function formatBytes(sizeBytes: number): string {
   if (sizeBytes < 1024) {
@@ -1654,32 +1636,12 @@ function RightPanel({
       return <EmptyPanel text="Markdown preview could not be loaded." />
     }
     const content = markdownPreview?.content || 'Markdown preview is empty.'
-    if (markdownViewMode === 'code') {
-      return (
-        <div className="workflow-markdown-preview workflow-markdown-code-view">
-          <SyntaxHighlighter
-            language="markdown"
-            style={oneDark}
-            customStyle={{ margin: 0, background: 'transparent', padding: 0 }}
-            codeTagProps={{ className: 'workflow-markdown-code' }}
-            wrapLongLines
-          >
-            {content}
-          </SyntaxHighlighter>
-        </div>
-      )
-    }
     return (
-      <MathJaxContext>
-        <MathJax dynamic className="workflow-markdown-preview workflow-markdown-rendered">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeRaw, [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA], rehypeMathjax]}
-          >
-            {content}
-          </ReactMarkdown>
-        </MathJax>
-      </MathJaxContext>
+      <MarkdownViewer
+        content={content}
+        mode={markdownViewMode}
+        className="workflow-markdown-preview"
+      />
     )
   }
 
@@ -1697,32 +1659,12 @@ function RightPanel({
       return <EmptyPanel text="Markdown preview could not be loaded." />
     }
     const content = markdownPreview?.content || 'Markdown preview is empty.'
-    if (markdownViewMode === 'code') {
-      return (
-        <div className="workflow-markdown-preview workflow-markdown-code-view">
-          <SyntaxHighlighter
-            language="markdown"
-            style={oneDark}
-            customStyle={{ margin: 0, background: 'transparent', padding: 0 }}
-            codeTagProps={{ className: 'workflow-markdown-code' }}
-            wrapLongLines
-          >
-            {content}
-          </SyntaxHighlighter>
-        </div>
-      )
-    }
     return (
-      <MathJaxContext>
-        <MathJax dynamic className="workflow-markdown-preview workflow-markdown-rendered">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeRaw, [rehypeSanitize, MARKDOWN_SANITIZE_SCHEMA], rehypeMathjax]}
-          >
-            {content}
-          </ReactMarkdown>
-        </MathJax>
-      </MathJaxContext>
+      <MarkdownViewer
+        content={content}
+        mode={markdownViewMode}
+        className="workflow-markdown-preview"
+      />
     )
   }
 

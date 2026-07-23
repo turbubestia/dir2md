@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from common.gateway import GatewayError
 from common.config import AppConfig, ConfigValidationError
@@ -28,6 +29,21 @@ def _emit_progress(
         progress_callback(event)
 
 
+def _validate_generation_inputs(config: AppConfig) -> None:
+    source_dir = config.paths.source_dir
+    if source_dir is None:
+        raise ConfigValidationError("invalid_source_directory", "--source must be configured before generation starts")
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise ConfigValidationError("invalid_source_directory", f"--source must be an existing directory: {source_dir}")
+
+    output_dir = config.paths.output_dir
+    if output_dir is None:
+        raise ConfigValidationError("output_directory_not_specified", "--output must be configured before generation starts")
+
+    if not config.md_gen.prompts.system_text.strip():
+        raise ConfigValidationError("summary_prompt_not_specified", "Summary prompt must be configured before generation starts")
+
+
 def _count_total_jobs(config: AppConfig) -> int:
     total_jobs = 0
     for file_item in build_work_items(config):
@@ -43,6 +59,8 @@ def run_generation(
     progress_callback: GenerationProgressCallback | None = None,
 ) -> int:
     try:
+        _validate_generation_inputs(config)
+
         config.paths.output_dir.mkdir(parents=True, exist_ok=True)
 
         work_items = build_work_items(config)

@@ -109,6 +109,8 @@ class WorkflowState(BaseModel):
     discovery: WorkflowDiscoveryResponse | None = None
     ocr_status: WorkflowStageStatus = "idle"
     merge_status: WorkflowStageStatus = "idle"
+    llm_test_status: WorkflowStageStatus = "idle"
+    llm_test_result: LlmTestResult | None = None
     progress: WorkflowProgress = Field(default_factory=WorkflowProgress)
     counts: WorkflowCounts = Field(default_factory=WorkflowCounts)
     current_item: WorkflowActiveItem | None = None
@@ -195,6 +197,21 @@ class WorkflowMergeResultsResponse(BaseModel):
     items: list[WorkflowMergeResultItem]
 
 
+class LlmTestResult(BaseModel):
+    text: str | None = None
+    error: WorkflowStatusMessage | None = None
+
+
+class LlmTestRequest(BaseModel):
+    system_path: str
+    user_path: str
+    assistant_path: str = ""
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+
+
 class MarkdownPreviewResponse(BaseModel):
     id: str
     markdown_file: str
@@ -217,7 +234,9 @@ class ModelEndpointSettings(BaseModel):
 class MdGenSummarySettings(BaseModel):
     """md_gen summary prompt configuration."""
 
-    prompt_path: str = Field(..., min_length=1)
+    system_prompt: str = ""
+    assistant_prompt: str = ""
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
 
 
 class MdGenImageSettings(BaseModel):
@@ -237,13 +256,26 @@ class MdGenSettings(BaseModel):
 class MdMrgScoreSettings(BaseModel):
     """md_mrg scoring prompt configuration."""
 
-    prompt_path: str = Field(..., min_length=1)
+    system_prompt: str = ""
+    assistant_prompt: str = ""
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
+
+
+class MdMrgSummarySettings(BaseModel):
+    """md_mrg merge summary prompt configuration."""
+
+    system_prompt: str = ""
+    assistant_prompt: str = ""
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
 
 
 class MdMrgSettings(BaseModel):
     """Top-level md_mrg settings section."""
 
-    score: MdMrgScoreSettings
+    model_config = ConfigDict(populate_by_name=True)
+
+    score: MdMrgScoreSettings = Field(..., alias="merge_score")
+    summary: MdMrgSummarySettings = Field(..., alias="merge_summary")
 
 
 class AppSettings(BaseModel):

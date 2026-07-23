@@ -27,14 +27,17 @@ def _cfg(source_dir: Path, *, overwrite: bool = False) -> AppConfig:
             request_max_retries=0,
         ),
         md_gen=MdGenSettings(
-            prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"),
+            prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
             image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096),
         ),
         md_mrg=MdMrgSettings(
             score=PromptSettings(
-                summary_prompt_path=prompt_file,
-                summary_prompt_text="score prompt",
+                system_path=str(prompt_file),
+                system_text="score prompt",
+                assistant_path="",
+                assistant_text="",
             ),
+            summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
         ),
         runtime=RuntimeSettings(dry_run=False, overwrite=overwrite),
     )

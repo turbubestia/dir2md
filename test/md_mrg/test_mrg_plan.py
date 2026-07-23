@@ -39,14 +39,17 @@ def _cfg(source_dir: Path) -> AppConfig:
             request_max_retries=0,
         ),
         md_gen=MdGenSettings(
-            prompts=PromptSettings(summary_prompt_path=None, summary_prompt_text="summary"),
+            prompts=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
             image=ImageSettings(max_longest_edge_px=1540, token_threshold=4096),
         ),
         md_mrg=MdMrgSettings(
             score=PromptSettings(
-                summary_prompt_path=source_dir / "score_prompt.md",
-                summary_prompt_text="Return JSON with score key.",
+                system_path=str(source_dir / "score_prompt.md"),
+                system_text="Return JSON with score key.",
+                assistant_path="",
+                assistant_text="",
             ),
+            summary=PromptSettings(system_path="", system_text="summary", assistant_path="", assistant_text=""),
         ),
         runtime=RuntimeSettings(dry_run=False, overwrite=False),
     )
@@ -250,7 +253,7 @@ def test_cli_main_dispatches_plan_mode(tmp_path: Path, monkeypatch: pytest.Monke
         called["plan"] = True
         return {"documents": []}
 
-    monkeypatch.setattr("md_mrg.cli.build_md_mrg_config_from_args", fake_build_cfg)
+    monkeypatch.setattr("md_mrg.cli.build_config_overrides", fake_build_cfg)
     monkeypatch.setattr("md_mrg.cli.run_plan", fake_run_plan)
     monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--plan"])
 
@@ -272,7 +275,7 @@ def test_cli_main_dispatches_apply_mode(tmp_path: Path, monkeypatch: pytest.Monk
         called["apply"] = True
         return {"items": []}
 
-    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", fake_build_cfg)
+    monkeypatch.setattr(cli_mod, "build_config_overrides", fake_build_cfg)
     monkeypatch.setattr(cli_mod, "run_apply", fake_run_apply)
     monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--apply"])
 
@@ -289,7 +292,7 @@ def test_cli_main_accepts_apply_overwrite_and_passes_to_config(tmp_path: Path, m
         seen_overwrite.append(args.overwrite)
         return _cfg(source_dir)
 
-    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", fake_build_cfg)
+    monkeypatch.setattr(cli_mod, "build_config_overrides", fake_build_cfg)
     monkeypatch.setattr(cli_mod, "run_apply", lambda source_dir, cfg: {"items": []})
     monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--apply", "--overwrite"])
 
@@ -301,7 +304,7 @@ def test_cli_main_prints_verbose_config_before_plan(tmp_path: Path, monkeypatch:
     source_dir = tmp_path / "out"
     source_dir.mkdir()
 
-    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", lambda args: _cfg(source_dir))
+    monkeypatch.setattr(cli_mod, "build_config_overrides", lambda args: _cfg(source_dir))
     monkeypatch.setattr(cli_mod, "format_config_dump", lambda config, command: f"dump for {command}")
     monkeypatch.setattr(cli_mod, "run_plan", lambda source_dir, cfg: {"documents": []})
     monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--plan", "--verbose"])
@@ -314,7 +317,7 @@ def test_cli_main_returns_config_error_code(monkeypatch: pytest.MonkeyPatch, cap
     def fail_build_cfg(args: SimpleNamespace) -> AppConfig:
         raise ConfigValidationError("bad_config", "bad config")
 
-    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", fail_build_cfg)
+    monkeypatch.setattr(cli_mod, "build_config_overrides", fail_build_cfg)
     monkeypatch.setattr("sys.argv", ["md-mrg", "--source", "ignored", "--plan"])
 
     assert cli_mod.main() == 2
@@ -331,7 +334,7 @@ def test_cli_main_returns_workflow_error_code(
     source_dir = tmp_path / "out"
     source_dir.mkdir()
 
-    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", lambda args: _cfg(source_dir))
+    monkeypatch.setattr(cli_mod, "build_config_overrides", lambda args: _cfg(source_dir))
     monkeypatch.setattr(cli_mod, "run_plan", lambda source_dir, cfg: (_ for _ in ()).throw(error_factory("workflow_failed", "failed")))
     monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--plan"])
 
@@ -343,7 +346,7 @@ def test_cli_main_returns_runtime_error_code(tmp_path: Path, monkeypatch: pytest
     source_dir = tmp_path / "out"
     source_dir.mkdir()
 
-    monkeypatch.setattr(cli_mod, "build_md_mrg_config_from_args", lambda args: _cfg(source_dir))
+    monkeypatch.setattr(cli_mod, "build_config_overrides", lambda args: _cfg(source_dir))
     monkeypatch.setattr(cli_mod, "run_apply", lambda source_dir, cfg: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr("sys.argv", ["md-mrg", "--source", str(source_dir), "--apply"])
 

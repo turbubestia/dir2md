@@ -11,14 +11,15 @@ import queue
 from pathlib import Path
 from typing import Sequence
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import ValidationError
 
 from .models import (
     AppSettings,
     EditableMergePlan,
+    LlmTestRequest,
     MarkdownPreviewResponse,
     WorkflowDiscoveryResponse,
     WorkflowMergeRequest,
@@ -30,6 +31,7 @@ from .settings_store import (
     SETTINGS_FILE,
     SettingsStoreError,
     load_settings,
+    resolve_shared_config,
     save_settings,
 )
 from .workflow import WorkflowService, WorkflowServiceError
@@ -60,6 +62,8 @@ def create_app(
 
     origins = list(allowed_origins if allowed_origins is not None else DEFAULT_ALLOWED_ORIGINS)
     workflow_service = WorkflowService()
+    temp_dir = settings_path.parent.parent / "temp"
+
     application.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -97,6 +101,7 @@ def create_app(
     def post_workflow_start() -> WorkflowDiscoveryResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.discover_start(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -108,6 +113,7 @@ def create_app(
     def post_workflow_ocr() -> WorkflowState:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.start_ocr(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -128,6 +134,7 @@ def create_app(
     def get_workflow_merge_plan() -> EditableMergePlan:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.get_editable_merge_plan(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -145,6 +152,7 @@ def create_app(
         try:
             plan = EditableMergePlan.model_validate(payload)
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.save_editable_merge_plan(settings, plan)
         except ValidationError as exc:
             return JSONResponse(
@@ -162,6 +170,7 @@ def create_app(
         try:
             request = WorkflowMergeRequest.model_validate(payload)
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.start_merge(settings, request.plan)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -183,6 +192,7 @@ def create_app(
     def get_workflow_merge_results() -> WorkflowMergeResultsResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.get_merge_results(settings)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -192,6 +202,46 @@ def create_app(
         except WorkflowServiceError as exc:
             return JSONResponse(
                 status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+        except WorkflowServiceError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc)},
+            )  # type: ignore[return-value]
+
+    @application.get("/api/llm-test-prompt/{name}")
+    def get_llm_test_prompt(name: str) -> PlainTextResponse:
+        if name not in {"system", "user", "assistant"}:
+            return PlainTextResponse("Invalid prompt name.", status_code=400)
+        prompt_path = temp_dir / f"llm_test_{name}.md"
+        try:
+            text = prompt_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        return PlainTextResponse(text)
+
+    @application.put("/api/llm-test-prompt/{name}")
+    def put_llm_test_prompt(name: str, text: str = Body("", media_type="text/plain")) -> PlainTextResponse:
+        if name not in {"system", "user", "assistant"}:
+            return PlainTextResponse("Invalid prompt name.", status_code=400)
+        prompt_path = temp_dir / f"llm_test_{name}.md"
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            prompt_path.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            return PlainTextResponse(f"Failed to write prompt file: {exc}", status_code=500)
+        return PlainTextResponse("OK")
+
+    @application.post("/api/workflow/llm-test")
+    def post_workflow_llm_test(request: LlmTestRequest) -> WorkflowState:
+        try:
+            settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
+            return workflow_service.start_llm_test(settings, request)
+        except SettingsStoreError as exc:
+            return JSONResponse(
+                status_code=500,
                 content={"detail": str(exc)},
             )  # type: ignore[return-value]
         except WorkflowServiceError as exc:
@@ -224,6 +274,7 @@ def create_app(
     def get_source_preview(file_id: str) -> FileResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             path = workflow_service.resolve_preview_path(settings, file_id)
             return FileResponse(path)
         except SettingsStoreError as exc:
@@ -241,6 +292,7 @@ def create_app(
     def get_ocr_preview(artifact_id: str) -> FileResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             path = workflow_service.resolve_ocr_artifact_preview_path(settings, artifact_id)
             return FileResponse(path)
         except SettingsStoreError as exc:
@@ -258,6 +310,7 @@ def create_app(
     def get_markdown_preview(artifact_id: str) -> MarkdownPreviewResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.get_markdown_preview(settings, artifact_id)
         except SettingsStoreError as exc:
             return JSONResponse(
@@ -274,6 +327,7 @@ def create_app(
     def get_merge_result_preview(result_id: str) -> FileResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             path = workflow_service.resolve_merge_result_pdf_path(settings, result_id)
             return FileResponse(path)
         except SettingsStoreError as exc:
@@ -291,6 +345,7 @@ def create_app(
     def get_merge_result_markdown(result_id: str) -> MarkdownPreviewResponse:
         try:
             settings = load_settings(settings_path, defaults_path)
+            resolve_shared_config(settings)
             return workflow_service.get_merge_result_markdown(settings, result_id)
         except SettingsStoreError as exc:
             return JSONResponse(
